@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restaurant Bestelsysteem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --coral:#FF5A4E;
+  --coral-dark:#DE3E33;
+  --mustard:#FFB100;
+  --teal:#12706A;
+  --teal-dark:#0B4F4A;
+  --sage:#3FAF6D;
+  --sage-dark:#2E8C55;
+  --cream:#FFFBF2;
+  --charcoal:#2B2420;
+  --muted:#8A7F73;
+  --line:#EFE3D3;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  font-family:'Nunito', sans-serif;
+  color:var(--charcoal);
+  background:
+    radial-gradient(circle at 10% 0%, #FFE9DD 0%, transparent 55%),
+    radial-gradient(circle at 90% 10%, #FFF3D6 0%, transparent 50%),
+    linear-gradient(160deg, #FFF8EE 0%, #FFF1E2 100%);
+  min-height:100vh;
+}
+h1,h2,h3,.display{font-family:'Fredoka', 'Nunito', sans-serif;}
+button{font-family:'Nunito', sans-serif; cursor:pointer; border:none;}
+input,textarea{font-family:'Nunito', sans-serif;}
+
+.hidden{display:none !important;}
+
+/* ---------- Buttons ---------- */
+.btn{
+  font-weight:800;
+  border-radius:14px;
+  padding:12px 22px;
+  font-size:0.95rem;
+  box-shadow:0 3px 0 rgba(0,0,0,0.15);
+  transition:transform .08s ease;
+}
+.btn:active{transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,0.15);}
+.btn:disabled{opacity:0.4; cursor:not-allowed; box-shadow:none;}
+.btn-coral{background:var(--coral); color:white;}
+.btn-teal{background:var(--teal); color:white;}
+.btn-mustard{background:var(--mustard); color:var(--charcoal);}
+.btn-sage{background:var(--sage); color:white;}
+.btn-outline{background:white; color:var(--charcoal); border:2px solid var(--line);}
+.btn-danger{background:#E64545; color:white;}
+.btn-sm{padding:7px 14px; font-size:0.8rem; border-radius:10px;}
+
+input[type=text], textarea, input[type=password]{
+  border:2px solid var(--line);
+  border-radius:12px;
+  padding:12px 14px;
+  font-size:1rem;
+  width:100%;
+  background:white;
+}
+input[type=text]:focus, textarea:focus{outline:none; border-color:var(--coral);}
+label.checkbox{
+  display:flex; align-items:center; gap:8px; font-weight:700; cursor:pointer;
+}
+
+/* ---------- Start / create / join screens ---------- */
+.centered-screen{
+  min-height:100vh;
+  display:flex; align-items:center; justify-content:center;
+  padding:24px;
+}
+.card{
+  background:var(--cream);
+  border-radius:22px;
+  padding:36px;
+  max-width:440px;
+  width:100%;
+  box-shadow:0 10px 0 rgba(0,0,0,0.08);
+  text-align:center;
+}
+.card .emoji-big{font-size:3.4rem;}
+.card h1{margin:6px 0 4px; font-size:1.8rem; color:var(--coral-dark);}
+.card p.sub{color:var(--muted); font-weight:700; margin:0 0 24px;}
+.card .stack{display:flex; flex-direction:column; gap:12px;}
+.card .field{text-align:left; margin-bottom:16px;}
+.card .field label{display:block; font-weight:800; margin-bottom:6px; font-size:0.85rem; color:var(--teal-dark);}
+.back-link{
+  background:none; color:var(--muted); font-weight:700; margin-top:14px; font-size:0.85rem;
+  text-decoration:underline;
+}
+.error-msg{
+  color:var(--coral-dark); font-weight:800; font-size:0.85rem; margin-top:8px; min-height:1.2em;
+}
+
+/* ---------- App shell ---------- */
+.app-shell{min-height:100vh; padding-bottom:60px;}
+.topbar{
+  background:var(--teal);
+  color:white;
+  padding:16px 20px;
+  display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px;
+}
+.topbar .brand{display:flex; align-items:center; gap:10px;}
+.topbar .brand h1{margin:0; font-size:1.3rem; color:white;}
+.topbar .brand .code-chip{
+  background:rgba(255,255,255,0.15); padding:4px 10px; border-radius:999px; font-size:0.75rem; font-weight:800;
+  letter-spacing:1px;
+}
+.topbar .leave-btn{background:rgba(255,255,255,0.15); color:white;}
+
+.tabbar{
+  display:flex; gap:6px; padding:10px 16px; overflow-x:auto;
+  background:var(--teal-dark);
+}
+.tab-btn{
+  background:transparent; color:rgba(255,255,255,0.65);
+  font-weight:800; padding:10px 16px; border-radius:12px; white-space:nowrap; font-size:0.9rem;
+}
+.tab-btn.active{background:var(--cream); color:var(--teal-dark);}
+
+.view-panel{max-width:1100px; margin:0 auto; padding:20px 16px;}
+
+/* ---------- Bestellen ---------- */
+.order-layout{display:grid; grid-template-columns:1fr 340px; gap:18px;}
+@media (max-width:820px){.order-layout{grid-template-columns:1fr;}}
+
+.product-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(120px,1fr)); gap:12px;}
+.product-card{
+  background:var(--cream);
+  border-radius:16px;
+  padding:16px 8px;
+  text-align:center;
+  box-shadow:0 3px 0 rgba(0,0,0,0.08);
+  border:2px solid transparent;
+}
+.product-card .emoji{font-size:2.1rem;}
+.product-card .name{font-weight:800; font-size:0.85rem; margin-top:4px;}
+.product-card:not(.soldout):hover{border-color:var(--coral);}
+.product-card.soldout{opacity:0.4; filter:grayscale(0.6);}
+.product-card.soldout .name::after{content:" (uitverkocht)"; font-weight:600; color:var(--coral-dark); font-size:0.7rem;}
+
+.cart-panel{
+  background:var(--cream); border-radius:18px; padding:16px;
+  box-shadow:0 3px 0 rgba(0,0,0,0.08);
+  align-self:start;
+  position:sticky; top:16px;
+}
+.cart-panel h3{margin:0 0 10px; color:var(--teal-dark);}
+.cart-item{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:8px 0; border-bottom:1px dashed var(--line);
+  font-size:0.85rem;
+}
+.cart-item .left{display:flex; align-items:center; gap:8px; font-weight:700;}
+.cart-item .ice-tag{font-size:0.7rem; background:#E6F5F3; color:var(--teal-dark); padding:2px 8px; border-radius:999px; font-weight:800;}
+.cart-item .qty-ctrl{display:flex; align-items:center; gap:6px;}
+.cart-item .qty-ctrl button{background:var(--line); width:22px; height:22px; border-radius:6px; font-weight:800;}
+.cart-empty{color:var(--muted); font-size:0.85rem; text-align:center; padding:14px 0;}
+
+/* ---------- Ice modal ---------- */
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(43,36,32,0.55);
+  display:flex; align-items:center; justify-content:center; z-index:60; padding:16px;
+}
+.modal{
+  background:white; border-radius:20px; padding:26px; max-width:380px; width:100%;
+  box-shadow:0 10px 0 rgba(0,0,0,0.15); text-align:center;
+}
+.modal h3{margin:0 0 14px; color:var(--teal-dark);}
+.modal .choice-row{display:flex; gap:10px; margin-top:10px;}
+.modal .choice-row .btn{flex:1;}
+
+/* ---------- Keuken (kanban) ---------- */
+.kanban{display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;}
+@media (max-width:820px){.kanban{grid-template-columns:1fr;}}
+.kanban-col{
+  background:rgba(255,255,255,0.5); border-radius:16px; padding:12px; min-height:120px;
+}
+.kanban-col h3{
+  margin:0 0 10px; font-size:0.95rem; display:flex; align-items:center; justify-content:space-between;
+}
+.kanban-col .count{background:var(--coral); color:white; font-size:0.7rem; padding:2px 9px; border-radius:999px;}
+
+.ticket{
+  background:var(--cream);
+  border-radius:4px 4px 12px 12px;
+  padding:14px;
+  margin-bottom:12px;
+  box-shadow:0 3px 0 rgba(0,0,0,0.08);
+  border-top:6px dashed var(--mustard);
+  font-size:0.85rem;
+}
+.ticket .time{color:var(--muted); font-weight:700; font-size:0.72rem; margin-bottom:6px;}
+.ticket .item-line{display:flex; justify-content:space-between; gap:6px; padding:3px 0;}
+.ticket .item-line .qty{font-weight:900; color:var(--coral-dark); margin-right:4px;}
+.ticket .note{
+  margin-top:8px; padding:8px; background:#FFF3D6; border-radius:8px; font-style:italic; font-size:0.8rem;
+}
+.ticket .ticket-actions{margin-top:10px; display:flex; gap:8px;}
+.empty-col-msg{color:var(--muted); font-size:0.8rem; text-align:center; padding:16px 4px;}
+
+/* ---------- Historie ---------- */
+.history-toolbar{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;}
+table.totals-table{width:100%; border-collapse:collapse; background:var(--cream); border-radius:14px; overflow:hidden; margin-bottom:22px;}
+table.totals-table th, table.totals-table td{padding:10px 14px; text-align:left; font-size:0.88rem;}
+table.totals-table th{background:var(--teal); color:white;}
+table.totals-table tr:nth-child(even){background:#FFF3E4;}
+.history-order{
+  background:var(--cream); border-radius:14px; padding:14px 16px; margin-bottom:10px;
+  box-shadow:0 2px 0 rgba(0,0,0,0.06);
+}
+.history-order .head{display:flex; justify-content:space-between; font-weight:800; font-size:0.85rem; color:var(--teal-dark);}
+.history-order .items{margin:8px 0 0; padding-left:0; list-style:none; font-size:0.85rem;}
+.history-order .items li{padding:2px 0;}
+.history-order .note{font-style:italic; color:var(--muted); font-size:0.8rem; margin-top:6px;}
+
+/* ---------- Voorraad ---------- */
+.stock-list{display:flex; flex-direction:column; gap:10px;}
+.stock-row{
+  background:var(--cream); border-radius:14px; padding:12px 16px;
+  display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
+}
+.stock-row .left{display:flex; align-items:center; gap:10px; font-weight:800;}
+.stock-row .emoji{font-size:1.6rem;}
+.status-badge{font-size:0.72rem; font-weight:800; padding:4px 10px; border-radius:999px;}
+.status-badge.in-stock{background:#E4F5E9; color:var(--sage-dark);}
+.status-badge.sold-out{background:#FCE4E2; color:var(--coral-dark);}
+
+/* ---------- Instellingen ---------- */
+.settings-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+@media (max-width:820px){.settings-grid{grid-template-columns:1fr;}}
+.panel-box{background:var(--cream); border-radius:18px; padding:18px; box-shadow:0 3px 0 rgba(0,0,0,0.08);}
+.panel-box h3{margin:0 0 12px; color:var(--teal-dark);}
+.code-display{
+  display:flex; align-items:center; gap:10px; background:white; border:2px dashed var(--coral);
+  border-radius:12px; padding:14px; font-size:1.5rem; font-weight:900; letter-spacing:3px; color:var(--coral-dark);
+  justify-content:center;
+}
+.emoji-picker{display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 14px;}
+.emoji-picker button{
+  background:white; border:2px solid var(--line); border-radius:10px; font-size:1.2rem; padding:6px 8px;
+}
+.emoji-picker button.selected{border-color:var(--coral); background:#FFEDE9;}
+.product-manage-row{
+  display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0;
+  border-bottom:1px solid var(--line); font-size:0.85rem;
+}
+.product-manage-row .left{display:flex; align-items:center; gap:8px; font-weight:700;}
+.ice-flag{font-size:0.7rem; background:#E6F5F3; color:var(--teal-dark); padding:2px 8px; border-radius:999px; font-weight:800;}
+
+.toast{
+  position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+  background:var(--charcoal); color:white; padding:11px 20px; border-radius:12px;
+  font-weight:700; font-size:0.9rem; z-index:80; opacity:0; transition:opacity .25s ease; pointer-events:none;
+}
+.toast.show{opacity:1;}
+
+.section-title{color:var(--teal-dark); margin:0 0 14px;}
+.muted{color:var(--muted); font-weight:600;}
+
+</style>
+</head>
+<body>
+
+<div id="configWarning" class="hidden" style="background:#E64545; color:white; text-align:center; padding:14px 16px; font-weight:800; font-size:0.9rem;">
+  ⚠️ Firebase is nog niet ingesteld. Open dit bestand in een teksteditor, zoek naar <code style="background:rgba(255,255,255,0.25); padding:2px 6px; border-radius:6px;">firebaseConfig</code> en vul je eigen Firebase-projectgegevens in (zie README.md).
+</div>
+<div id="fatalError" class="hidden" style="background:#2B2420; color:white; padding:20px; font-weight:700; max-width:600px; margin:40px auto; border-radius:14px; text-align:center;"></div>
+
+<!-- ===================== START SCHERM ===================== -->
+<div id="view-start" class="centered-screen">
+  <div class="card">
+    <div class="emoji-big">🍽️</div>
+    <h1>Restaurant Bestelsysteem</h1>
+    <p class="sub">Start een nieuw restaurant of join er eentje met een code</p>
+    <div class="stack">
+      <button class="btn btn-coral" id="goCreateBtn">🏠 Restaurant starten</button>
+      <button class="btn btn-teal" id="goJoinBtn">🔑 Restaurant joinen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== RESTAURANT MAKEN ===================== -->
+<div id="view-create" class="centered-screen hidden">
+  <div class="card">
+    <div class="emoji-big">🏠</div>
+    <h1>Restaurant starten</h1>
+    <p class="sub">Geef je restaurant een naam</p>
+    <div class="field">
+      <label>Naam van je restaurant</label>
+      <input type="text" id="createNameInput" placeholder="Bijv. Bistro De Zon">
+    </div>
+    <button class="btn btn-coral" id="createSubmitBtn" style="width:100%;">Aanmaken</button>
+    <div class="error-msg" id="createError"></div>
+    <button class="back-link" id="createBackBtn">← Terug</button>
+  </div>
+</div>
+
+<!-- ===================== RESTAURANT JOINEN ===================== -->
+<div id="view-join" class="centered-screen hidden">
+  <div class="card">
+    <div class="emoji-big">🔑</div>
+    <h1>Restaurant joinen</h1>
+    <p class="sub">Vul de aansluitcode van het restaurant in</p>
+    <div class="field">
+      <label>Code</label>
+      <input type="text" id="joinCodeInput" placeholder="Bijv. AB12CD" style="text-transform:uppercase; letter-spacing:3px; text-align:center; font-weight:800;">
+    </div>
+    <button class="btn btn-teal" id="joinSubmitBtn" style="width:100%;">Joinen</button>
+    <div class="error-msg" id="joinError"></div>
+    <button class="back-link" id="joinBackBtn">← Terug</button>
+  </div>
+</div>
+
+<!-- ===================== HOOFD APP ===================== -->
+<div id="view-app" class="app-shell hidden">
+  <div class="topbar">
+    <div class="brand">
+      <h1 id="restaurantNameLabel">Restaurant</h1>
+      <span class="code-chip" id="topCodeChip">CODE</span>
+    </div>
+    <button class="btn leave-btn btn-sm" id="leaveBtn">🚪 Ander restaurant</button>
+  </div>
+  <div class="tabbar" id="tabbar">
+    <button class="tab-btn" data-tab="bestellen">🧾 Bestellen</button>
+    <button class="tab-btn" data-tab="keuken">👨‍🍳 Keuken</button>
+    <button class="tab-btn" data-tab="historie">📜 Historie</button>
+    <button class="tab-btn" data-tab="voorraad">📦 Voorraad</button>
+    <button class="tab-btn" data-tab="instellingen">⚙️ Instellingen</button>
+  </div>
+
+  <!-- ---------- TAB: BESTELLEN ---------- -->
+  <div class="view-panel tab-panel" id="tab-bestellen">
+    <h2 class="section-title">Nieuwe bestelling</h2>
+    <div class="order-layout">
+      <div>
+        <div class="product-grid" id="orderProductGrid"></div>
+      </div>
+      <div class="cart-panel">
+        <h3>🛒 Huidige bestelling</h3>
+        <div id="cartList"></div>
+        <div class="field" style="margin-top:14px;">
+          <label style="font-weight:800; font-size:0.8rem; color:var(--teal-dark); display:block; margin-bottom:6px;">Opmerking (optioneel)</label>
+          <textarea id="orderNote" rows="2" placeholder="Bijv. tafel 5, extra saus..."></textarea>
+        </div>
+        <button class="btn btn-coral" id="submitOrderBtn" style="width:100%; margin-top:10px;">✅ Bestellen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- TAB: KEUKEN ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-keuken">
+    <h2 class="section-title">Keuken</h2>
+    <div class="kanban">
+      <div class="kanban-col">
+        <h3>🆕 Nieuw <span class="count" id="countNieuw">0</span></h3>
+        <div id="colNieuw"></div>
+      </div>
+      <div class="kanban-col">
+        <h3>🔥 In bereiding <span class="count" id="countBereiden">0</span></h3>
+        <div id="colBereiden"></div>
+      </div>
+      <div class="kanban-col">
+        <h3>✅ Klaar (bezorgen) <span class="count" id="countKlaar">0</span></h3>
+        <div id="colKlaar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- TAB: HISTORIE ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-historie">
+    <div class="history-toolbar">
+      <h2 class="section-title" style="margin:0;">Historie</h2>
+      <button class="btn btn-danger btn-sm" id="clearHistoryBtn">🗑️ Historie verwijderen</button>
+    </div>
+    <h3 style="color:var(--teal-dark);">Totaal overzicht</h3>
+    <table class="totals-table" id="totalsTable">
+      <thead><tr><th>Product</th><th>IJs</th><th>Aantal besteld</th></tr></thead>
+      <tbody id="totalsTableBody"></tbody>
+    </table>
+    <h3 style="color:var(--teal-dark);">Alle bestellingen</h3>
+    <div id="historyList"></div>
+  </div>
+
+  <!-- ---------- TAB: VOORRAAD ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-voorraad">
+    <h2 class="section-title">Voorraad</h2>
+    <div class="stock-list" id="stockList"></div>
+  </div>
+
+  <!-- ---------- TAB: INSTELLINGEN ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-instellingen">
+    <h2 class="section-title">Instellingen</h2>
+    <div class="settings-grid">
+      <div class="panel-box">
+        <h3>🔑 Aansluitcode</h3>
+        <p class="muted" style="font-size:0.85rem;">Deel deze code om anderen te laten joinen op dit restaurant.</p>
+        <div class="code-display" id="settingsCodeDisplay">------</div>
+        <button class="btn btn-outline btn-sm" id="copyCodeBtn" style="width:100%; margin-top:10px;">📋 Kopieer code</button>
+
+        <h3 style="margin-top:22px;">➕ Product toevoegen</h3>
+        <div class="field">
+          <label>Naam</label>
+          <input type="text" id="newProductName" placeholder="Bijv. Cola">
+        </div>
+        <div class="field">
+          <label>Emoji</label>
+          <input type="text" id="newProductEmoji" placeholder="Plak of typ een emoji, bijv. 🥤" maxlength="4">
+          <div class="emoji-picker" id="emojiQuickPick"></div>
+        </div>
+        <label class="checkbox" style="margin-bottom:14px;">
+          <input type="checkbox" id="newProductIce"> Heeft een ijs-keuze (met / zonder ijs)
+        </label>
+        <button class="btn btn-teal" id="addProductBtn" style="width:100%;">Product toevoegen</button>
+      </div>
+
+      <div class="panel-box">
+        <h3>📋 Producten beheren</h3>
+        <div id="manageProductsList"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="modalRoot"></div>
+<div id="toast" class="toast"></div>
+
+<!-- Firebase (compat SDK, geen build-tools nodig) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script>
+// ============================================================
+// VUL HIER JE EIGEN FIREBASE-GEGEVENS IN
+// ============================================================
+// 1. Ga naar https://console.firebase.google.com
+// 2. Maak een nieuw (gratis) project aan
+// 3. Ga links naar "Build" -> "Firestore Database" -> "Create database"
+//    - Kies "Start in test mode" (of gebruik de regels uit README.md)
+// 4. Ga naar het tandwiel-icoon -> "Project settings" -> tab "General"
+// 5. Scroll naar "Your apps" -> klik het "</>" (web) icoon -> registreer een app
+// 6. Kopieer het "firebaseConfig" object dat je te zien krijgt hieronder
+// ============================================================
+
+const firebaseConfig = {
+  apiKey: "JOUW_API_KEY",
+  authDomain: "JOUW_PROJECT.firebaseapp.com",
+  projectId: "JOUW_PROJECT_ID",
+  storageBucket: "JOUW_PROJECT.appspot.com",
+  messagingSenderId: "JOUW_SENDER_ID",
+  appId: "JOUW_APP_ID"
+};
+
+</script>
+<script>
+(function () {
+  "use strict";
+
+  // ---------------------------------------------------------
+  // Config check — show a clear on-screen warning instead of
+  // silently failing when the Firebase keys haven't been filled in yet
+  // ---------------------------------------------------------
+  const configLooksUnfilled = !firebaseConfig || String(firebaseConfig.apiKey || '').includes('JOUW_');
+  if (configLooksUnfilled) {
+    document.getElementById('configWarning').classList.remove('hidden');
+  }
+
+  // Catch any later runtime error and show it on screen instead of a silently broken page
+  window.addEventListener('error', function (e) {
+    const fatal = document.getElementById('fatalError');
+    fatal.textContent = 'Er ging iets mis: ' + (e.message || 'onbekende fout') + '. Open het browserconsole (F12) voor meer details.';
+    fatal.classList.remove('hidden');
+  });
+
+  // ---------------------------------------------------------
+  // Firebase init
+  // ---------------------------------------------------------
+  let db = null;
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.firestore();
+  } catch (err) {
+    console.error('Firebase kon niet worden gestart:', err);
+    const fatal = document.getElementById('fatalError');
+    fatal.textContent = 'Firebase kon niet worden gestart. Controleer firebaseConfig bovenin dit bestand. Foutmelding: ' + err.message;
+    fatal.classList.remove('hidden');
+    return;
+  }
+
+  // ---------------------------------------------------------
+  // Elements
+  // ---------------------------------------------------------
+  const el = {
+    viewStart: document.getElementById('view-start'),
+    viewCreate: document.getElementById('view-create'),
+    viewJoin: document.getElementById('view-join'),
+    viewApp: document.getElementById('view-app'),
+
+    goCreateBtn: document.getElementById('goCreateBtn'),
+    goJoinBtn: document.getElementById('goJoinBtn'),
+    createBackBtn: document.getElementById('createBackBtn'),
+    joinBackBtn: document.getElementById('joinBackBtn'),
+    createNameInput: document.getElementById('createNameInput'),
+    createSubmitBtn: document.getElementById('createSubmitBtn'),
+    createError: document.getElementById('createError'),
+    joinCodeInput: document.getElementById('joinCodeInput'),
+    joinSubmitBtn: document.getElementById('joinSubmitBtn'),
+    joinError: document.getElementById('joinError'),
+
+    restaurantNameLabel: document.getElementById('restaurantNameLabel'),
+    topCodeChip: document.getElementById('topCodeChip'),
+    leaveBtn: document.getElementById('leaveBtn'),
+    tabbar: document.getElementById('tabbar'),
+
+    orderProductGrid: document.getElementById('orderProductGrid'),
+    cartList: document.getElementById('cartList'),
+    orderNote: document.getElementById('orderNote'),
+    submitOrderBtn: document.getElementById('submitOrderBtn'),
+
+    colNieuw: document.getElementById('colNieuw'),
+    colBereiden: document.getElementById('colBereiden'),
+    colKlaar: document.getElementById('colKlaar'),
+    countNieuw: document.getElementById('countNieuw'),
+    countBereiden: document.getElementById('countBereiden'),
+    countKlaar: document.getElementById('countKlaar'),
+
+    clearHistoryBtn: document.getElementById('clearHistoryBtn'),
+    totalsTableBody: document.getElementById('totalsTableBody'),
+    historyList: document.getElementById('historyList'),
+
+    stockList: document.getElementById('stockList'),
+
+    settingsCodeDisplay: document.getElementById('settingsCodeDisplay'),
+    copyCodeBtn: document.getElementById('copyCodeBtn'),
+    newProductName: document.getElementById('newProductName'),
+    newProductEmoji: document.getElementById('newProductEmoji'),
+    newProductIce: document.getElementById('newProductIce'),
+    emojiQuickPick: document.getElementById('emojiQuickPick'),
+    addProductBtn: document.getElementById('addProductBtn'),
+    manageProductsList: document.getElementById('manageProductsList'),
+
+    modalRoot: document.getElementById('modalRoot'),
+    toast: document.getElementById('toast'),
+  };
+
+  const QUICK_EMOJIS = ['🍕','🍔','🍟','🌭','🥪','🌮','🌯','🥗','🍝','🍜','🍣','🍤','🍗','🥩','🍳','🥞',
+                         '🍩','🍪','🍰','🧁','🍦','🍨','🥤','🧋','☕','🍺','🍷','🥤','🥛','🍹','🍎','🍟'];
+
+  let currentCode = null;
+  let currentRole = null; // 'owner' | 'guest' (informational only)
+  let products = [];      // live products
+  let orders = [];        // live orders (all, unfiltered)
+  let cart = [];           // {productId, name, emoji, ice, qty}
+  let unsubProducts = null;
+  let unsubOrders = null;
+
+  // ---------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------
+  function showToast(msg) {
+    el.toast.textContent = msg;
+    el.toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => el.toast.classList.remove('show'), 2000);
+  }
+
+  function genCode() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no easily-confused chars
+    let out = '';
+    for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+  }
+
+  function switchScreen(name) {
+    [el.viewStart, el.viewCreate, el.viewJoin, el.viewApp].forEach(v => v.classList.add('hidden'));
+    if (name === 'start') el.viewStart.classList.remove('hidden');
+    if (name === 'create') el.viewCreate.classList.remove('hidden');
+    if (name === 'join') el.viewJoin.classList.remove('hidden');
+    if (name === 'app') el.viewApp.classList.remove('hidden');
+  }
+
+  function switchTab(tab) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+    document.getElementById('tab-' + tab).classList.remove('hidden');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  }
+
+  function fmtTime(ts) {
+    if (!ts) return '';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  }
+  function fmtDateTime(ts) {
+    if (!ts) return '';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString('nl-NL') + ' ' + d.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // ---------------------------------------------------------
+  // Start / create / join navigation
+  // ---------------------------------------------------------
+  el.goCreateBtn.addEventListener('click', () => { el.createError.textContent = ''; switchScreen('create'); });
+  el.goJoinBtn.addEventListener('click', () => { el.joinError.textContent = ''; switchScreen('join'); });
+  el.createBackBtn.addEventListener('click', () => switchScreen('start'));
+  el.joinBackBtn.addEventListener('click', () => switchScreen('start'));
+
+  el.createSubmitBtn.addEventListener('click', async () => {
+    const name = el.createNameInput.value.trim();
+    if (!name) { el.createError.textContent = 'Vul een naam in.'; return; }
+    el.createSubmitBtn.disabled = true;
+    el.createError.textContent = '';
+    try {
+      let code = genCode();
+      // avoid collision (very unlikely, but check once)
+      let existing = await db.collection('restaurants').doc(code).get();
+      if (existing.exists) code = genCode();
+
+      await db.collection('restaurants').doc(code).set({
+        name: name,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      enterRestaurant(code, 'owner', name);
+    } catch (err) {
+      console.error(err);
+      el.createError.textContent = 'Kon geen verbinding maken. Controleer je Firebase-instellingen in firebase-config.js.';
+    } finally {
+      el.createSubmitBtn.disabled = false;
+    }
+  });
+
+  el.joinSubmitBtn.addEventListener('click', async () => {
+    const code = el.joinCodeInput.value.trim().toUpperCase();
+    if (!code) { el.joinError.textContent = 'Vul een code in.'; return; }
+    el.joinSubmitBtn.disabled = true;
+    el.joinError.textContent = '';
+    try {
+      const doc = await db.collection('restaurants').doc(code).get();
+      if (!doc.exists) {
+        el.joinError.textContent = 'Geen restaurant gevonden met deze code.';
+        return;
+      }
+      enterRestaurant(code, 'guest', doc.data().name);
+    } catch (err) {
+      console.error(err);
+      el.joinError.textContent = 'Kon geen verbinding maken. Controleer je Firebase-instellingen in firebase-config.js.';
+    } finally {
+      el.joinSubmitBtn.disabled = false;
+    }
+  });
+
+  el.leaveBtn.addEventListener('click', () => {
+    if (unsubProducts) unsubProducts();
+    if (unsubOrders) unsubOrders();
+    localStorage.removeItem('restaurantCode');
+    localStorage.removeItem('restaurantRole');
+    currentCode = null;
+    products = [];
+    orders = [];
+    cart = [];
+    switchScreen('start');
+  });
+
+  function enterRestaurant(code, role, name) {
+    currentCode = code;
+    currentRole = role;
+    localStorage.setItem('restaurantCode', code);
+    localStorage.setItem('restaurantRole', role);
+
+    el.restaurantNameLabel.textContent = name;
+    el.topCodeChip.textContent = code;
+    el.settingsCodeDisplay.textContent = code;
+
+    switchScreen('app');
+    switchTab('bestellen');
+    attachListeners(code);
+  }
+
+  // try auto-resume from localStorage
+  (function tryResume() {
+    const code = localStorage.getItem('restaurantCode');
+    const role = localStorage.getItem('restaurantRole');
+    if (!code) return;
+    db.collection('restaurants').doc(code).get().then(doc => {
+      if (doc.exists) {
+        enterRestaurant(code, role || 'guest', doc.data().name);
+      } else {
+        localStorage.removeItem('restaurantCode');
+      }
+    }).catch(() => { /* stay on start screen if offline / misconfigured */ });
+  })();
+
+  // ---------------------------------------------------------
+  // Tab switching
+  // ---------------------------------------------------------
+  el.tabbar.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab-btn');
+    if (!btn) return;
+    switchTab(btn.dataset.tab);
+  });
+
+  // ---------------------------------------------------------
+  // Realtime listeners
+  // ---------------------------------------------------------
+  function attachListeners(code) {
+    if (unsubProducts) unsubProducts();
+    if (unsubOrders) unsubOrders();
+
+    unsubProducts = db.collection('restaurants').doc(code).collection('products')
+      .orderBy('createdAt', 'asc')
+      .onSnapshot(snap => {
+        products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderProductsEverywhere();
+      }, err => console.error('products listener error', err));
+
+    unsubOrders = db.collection('restaurants').doc(code).collection('orders')
+      .orderBy('createdAt', 'asc')
+      .onSnapshot(snap => {
+        orders = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        renderKitchen();
+        renderHistory();
+      }, err => console.error('orders listener error', err));
+  }
+
+  function renderProductsEverywhere() {
+    renderOrderProducts();
+    renderStock();
+    renderManageProducts();
+    renderEmojiPicker();
+  }
+
+  // ---------------------------------------------------------
+  // TAB: Bestellen
+  // ---------------------------------------------------------
+  function renderOrderProducts() {
+    el.orderProductGrid.innerHTML = '';
+    if (products.length === 0) {
+      el.orderProductGrid.innerHTML = '<p class="muted">Nog geen producten. Voeg ze toe bij Instellingen.</p>';
+      return;
+    }
+    products.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'product-card' + (p.outOfStock ? ' soldout' : '');
+      card.innerHTML = `<div class="emoji">${p.emoji}</div><div class="name">${p.name}</div>`;
+      if (!p.outOfStock) {
+        card.addEventListener('click', () => {
+          if (p.hasIce) {
+            openIceModal(p);
+          } else {
+            addToCart(p, null);
+          }
+        });
+      }
+      el.orderProductGrid.appendChild(card);
+    });
+  }
+
+  function openIceModal(product) {
+    el.modalRoot.innerHTML = `
+      <div class="modal-overlay" id="iceOverlay">
+        <div class="modal">
+          <h3>${product.emoji} ${product.name}</h3>
+          <p class="muted">Met of zonder ijs?</p>
+          <div class="choice-row">
+            <button class="btn btn-teal" id="iceYesBtn">🧊 Met ijs</button>
+            <button class="btn btn-outline" id="iceNoBtn">Zonder ijs</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('iceOverlay').addEventListener('click', (e) => {
+      if (e.target.id === 'iceOverlay') closeModal();
+    });
+    document.getElementById('iceYesBtn').addEventListener('click', () => { addToCart(product, 'met'); closeModal(); });
+    document.getElementById('iceNoBtn').addEventListener('click', () => { addToCart(product, 'zonder'); closeModal(); });
+  }
+
+  function closeModal() { el.modalRoot.innerHTML = ''; }
+
+  function addToCart(product, ice) {
+    const existing = cart.find(c => c.productId === product.id && c.ice === ice);
+    if (existing) {
+      existing.qty += 1;
+    } else {
+      cart.push({ productId: product.id, name: product.name, emoji: product.emoji, ice: ice, qty: 1 });
+    }
+    renderCart();
+  }
+
+  function renderCart() {
+    if (cart.length === 0) {
+      el.cartList.innerHTML = '<div class="cart-empty">Nog niets toegevoegd</div>';
+      el.submitOrderBtn.disabled = true;
+      return;
+    }
+    el.submitOrderBtn.disabled = false;
+    el.cartList.innerHTML = '';
+    cart.forEach((item, idx) => {
+      const row = document.createElement('div');
+      row.className = 'cart-item';
+      row.innerHTML = `
+        <div class="left">${item.emoji} ${item.name} ${item.ice ? `<span class="ice-tag">${item.ice === 'met' ? '🧊 met ijs' : 'zonder ijs'}</span>` : ''}</div>
+        <div class="qty-ctrl">
+          <button data-act="dec" data-idx="${idx}">−</button>
+          <span>${item.qty}</span>
+          <button data-act="inc" data-idx="${idx}">+</button>
+        </div>`;
+      el.cartList.appendChild(row);
+    });
+  }
+
+  el.cartList.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    if (btn.dataset.act === 'inc') cart[idx].qty += 1;
+    if (btn.dataset.act === 'dec') {
+      cart[idx].qty -= 1;
+      if (cart[idx].qty <= 0) cart.splice(idx, 1);
+    }
+    renderCart();
+  });
+
+  el.submitOrderBtn.addEventListener('click', async () => {
+    if (cart.length === 0) return;
+    el.submitOrderBtn.disabled = true;
+    try {
+      await db.collection('restaurants').doc(currentCode).collection('orders').add({
+        items: cart.map(c => ({ productId: c.productId, name: c.name, emoji: c.emoji, ice: c.ice, qty: c.qty })),
+        note: el.orderNote.value.trim(),
+        status: 'nieuw',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      cart = [];
+      el.orderNote.value = '';
+      renderCart();
+      showToast('Bestelling verstuurd naar de keuken! 🧾');
+    } catch (err) {
+      console.error(err);
+      showToast('Bestelling versturen mislukt.');
+    } finally {
+      el.submitOrderBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------
+  // TAB: Keuken
+  // ---------------------------------------------------------
+  function ticketHtml(order, actionLabel, actionEvent, actionClass) {
+    const itemsHtml = order.items.map(it =>
+      `<div class="item-line"><span><span class="qty">${it.qty}×</span>${it.emoji} ${it.name}${it.ice ? (it.ice === 'met' ? ' (🧊 met ijs)' : ' (zonder ijs)') : ''}</span></div>`
+    ).join('');
+    return `
+      <div class="ticket" data-id="${order.id}">
+        <div class="time">🕐 ${fmtTime(order.createdAt)}</div>
+        ${itemsHtml}
+        ${order.note ? `<div class="note">💬 ${escapeHtml(order.note)}</div>` : ''}
+        <div class="ticket-actions">
+          <button class="btn ${actionClass} btn-sm" data-event="${actionEvent}" data-id="${order.id}">${actionLabel}</button>
+        </div>
+      </div>`;
+  }
+
+  function escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function renderKitchen() {
+    const nieuw = orders.filter(o => o.status === 'nieuw');
+    const bereiden = orders.filter(o => o.status === 'bereiden');
+    const klaar = orders.filter(o => o.status === 'klaar');
+
+    el.countNieuw.textContent = nieuw.length;
+    el.countBereiden.textContent = bereiden.length;
+    el.countKlaar.textContent = klaar.length;
+
+    el.colNieuw.innerHTML = nieuw.length ? nieuw.map(o => ticketHtml(o, '▶ Start bereiden', 'start', 'btn-mustard')).join('')
+      : '<div class="empty-col-msg">Geen nieuwe bestellingen</div>';
+    el.colBereiden.innerHTML = bereiden.length ? bereiden.map(o => ticketHtml(o, '✅ Klaar', 'ready', 'btn-sage')).join('')
+      : '<div class="empty-col-msg">Niets in bereiding</div>';
+    el.colKlaar.innerHTML = klaar.length ? klaar.map(o => ticketHtml(o, '🚚 Bezorgd', 'deliver', 'btn-teal')).join('')
+      : '<div class="empty-col-msg">Niets klaar om te bezorgen</div>';
+  }
+
+  document.getElementById('tab-keuken').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-event]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const ref = db.collection('restaurants').doc(currentCode).collection('orders').doc(id);
+    btn.disabled = true;
+    try {
+      if (btn.dataset.event === 'start') {
+        await ref.update({ status: 'bereiden', startedAt: firebase.firestore.FieldValue.serverTimestamp() });
+      } else if (btn.dataset.event === 'ready') {
+        await ref.update({ status: 'klaar', readyAt: firebase.firestore.FieldValue.serverTimestamp() });
+      } else if (btn.dataset.event === 'deliver') {
+        await ref.update({ status: 'bezorgd', deliveredAt: firebase.firestore.FieldValue.serverTimestamp() });
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Actie mislukt.');
+      btn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------
+  // TAB: Historie
+  // ---------------------------------------------------------
+  function renderHistory() {
+    const delivered = orders.filter(o => o.status === 'bezorgd').slice().reverse();
+
+    // Totals table
+    const totals = {}; // key: name|ice -> {name, emoji, ice, qty}
+    delivered.forEach(o => {
+      o.items.forEach(it => {
+        const key = it.name + '|' + (it.ice || '-');
+        if (!totals[key]) totals[key] = { name: it.name, emoji: it.emoji, ice: it.ice, qty: 0 };
+        totals[key].qty += it.qty;
+      });
+    });
+    const totalsArr = Object.values(totals).sort((a, b) => b.qty - a.qty);
+    el.totalsTableBody.innerHTML = totalsArr.length ? totalsArr.map(t =>
+      `<tr><td>${t.emoji} ${t.name}</td><td>${t.ice ? (t.ice === 'met' ? '🧊 met ijs' : 'zonder ijs') : '—'}</td><td>${t.qty}</td></tr>`
+    ).join('') : '<tr><td colspan="3" class="muted">Nog geen historie</td></tr>';
+
+    // Detailed list
+    if (delivered.length === 0) {
+      el.historyList.innerHTML = '<p class="muted">Nog geen bezorgde bestellingen.</p>';
+      return;
+    }
+    el.historyList.innerHTML = delivered.map(o => {
+      const itemsHtml = o.items.map(it =>
+        `<li>${it.qty}× ${it.emoji} ${it.name}${it.ice ? (it.ice === 'met' ? ' (🧊 met ijs)' : ' (zonder ijs)') : ''}</li>`
+      ).join('');
+      return `
+        <div class="history-order">
+          <div class="head">
+            <span>🕐 Besteld: ${fmtDateTime(o.createdAt)}</span>
+            <span>🚚 Bezorgd: ${fmtDateTime(o.deliveredAt)}</span>
+          </div>
+          <ul class="items">${itemsHtml}</ul>
+          ${o.note ? `<div class="note">💬 ${escapeHtml(o.note)}</div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  el.clearHistoryBtn.addEventListener('click', async () => {
+    const delivered = orders.filter(o => o.status === 'bezorgd');
+    if (delivered.length === 0) { showToast('Er is geen historie om te verwijderen.'); return; }
+    if (!confirm('Weet je zeker dat je alle historie wilt verwijderen? Dit kan niet ongedaan gemaakt worden.')) return;
+    el.clearHistoryBtn.disabled = true;
+    try {
+      const batch = db.batch();
+      delivered.forEach(o => {
+        batch.delete(db.collection('restaurants').doc(currentCode).collection('orders').doc(o.id));
+      });
+      await batch.commit();
+      showToast('Historie verwijderd.');
+    } catch (err) {
+      console.error(err);
+      showToast('Verwijderen mislukt.');
+    } finally {
+      el.clearHistoryBtn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------
+  // TAB: Voorraad
+  // ---------------------------------------------------------
+  function renderStock() {
+    if (products.length === 0) {
+      el.stockList.innerHTML = '<p class="muted">Nog geen producten. Voeg ze toe bij Instellingen.</p>';
+      return;
+    }
+    el.stockList.innerHTML = products.map(p => `
+      <div class="stock-row">
+        <div class="left"><span class="emoji">${p.emoji}</span> ${p.name}</div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span class="status-badge ${p.outOfStock ? 'sold-out' : 'in-stock'}">${p.outOfStock ? 'Uitverkocht' : 'Op voorraad'}</span>
+          <button class="btn btn-sm ${p.outOfStock ? 'btn-sage' : 'btn-danger'}" data-toggle-stock="${p.id}" data-current="${p.outOfStock ? '1' : '0'}">
+            ${p.outOfStock ? 'Terug op voorraad' : 'Zet op uitverkocht'}
+          </button>
+        </div>
+      </div>`).join('');
+  }
+
+  el.stockList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-toggle-stock]');
+    if (!btn) return;
+    const id = btn.dataset.toggleStock;
+    const nowOut = btn.dataset.current === '1';
+    btn.disabled = true;
+    try {
+      await db.collection('restaurants').doc(currentCode).collection('products').doc(id)
+        .update({ outOfStock: !nowOut });
+    } catch (err) {
+      console.error(err);
+      showToast('Aanpassen mislukt.');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // ---------------------------------------------------------
+  // TAB: Instellingen
+  // ---------------------------------------------------------
+  el.copyCodeBtn.addEventListener('click', () => {
+    navigator.clipboard.writeText(currentCode).then(() => showToast('Code gekopieerd!'))
+      .catch(() => showToast('Kon niet kopiëren, code is: ' + currentCode));
+  });
+
+  function renderEmojiPicker() {
+    el.emojiQuickPick.innerHTML = QUICK_EMOJIS.map(e => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
+  }
+  el.emojiQuickPick.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-emoji]');
+    if (!btn) return;
+    el.newProductEmoji.value = btn.dataset.emoji;
+    document.querySelectorAll('#emojiQuickPick button').forEach(b => b.classList.remove('selected'));
+    btn.classList.add('selected');
+  });
+
+  el.addProductBtn.addEventListener('click', async () => {
+    const name = el.newProductName.value.trim();
+    const emoji = el.newProductEmoji.value.trim();
+    const hasIce = el.newProductIce.checked;
+    if (!name) { showToast('Vul een productnaam in.'); return; }
+    if (!emoji) { showToast('Kies of typ een emoji.'); return; }
+    el.addProductBtn.disabled = true;
+    try {
+      await db.collection('restaurants').doc(currentCode).collection('products').add({
+        name, emoji, hasIce, outOfStock: false,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      el.newProductName.value = '';
+      el.newProductEmoji.value = '';
+      el.newProductIce.checked = false;
+      document.querySelectorAll('#emojiQuickPick button').forEach(b => b.classList.remove('selected'));
+      showToast('Product toegevoegd! 🎉');
+    } catch (err) {
+      console.error(err);
+      showToast('Toevoegen mislukt.');
+    } finally {
+      el.addProductBtn.disabled = false;
+    }
+  });
+
+  function renderManageProducts() {
+    if (products.length === 0) {
+      el.manageProductsList.innerHTML = '<p class="muted">Nog geen producten toegevoegd.</p>';
+      return;
+    }
+    el.manageProductsList.innerHTML = products.map(p => `
+      <div class="product-manage-row">
+        <div class="left">${p.emoji} ${p.name} ${p.hasIce ? '<span class="ice-flag">🧊 ijs-optie</span>' : ''}</div>
+        <button class="btn btn-danger btn-sm" data-delete-product="${p.id}">Verwijder</button>
+      </div>`).join('');
+  }
+
+  el.manageProductsList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-delete-product]');
+    if (!btn) return;
+    if (!confirm('Dit product verwijderen?')) return;
+    const id = btn.dataset.deleteProduct;
+    btn.disabled = true;
+    try {
+      await db.collection('restaurants').doc(currentCode).collection('products').doc(id).delete();
+    } catch (err) {
+      console.error(err);
+      showToast('Verwijderen mislukt.');
+      btn.disabled = false;
+    }
+  });
+
+})();
+
+</script>
+</body>
+</html>
