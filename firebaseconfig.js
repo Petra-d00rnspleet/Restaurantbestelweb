@@ -16,5 +16,5 @@ const firebaseConfig = {
   projectId: "sara-4dc17",
   storageBucket: "sara-4dc17.firebasestorage.app",
   messagingSenderId: "854913873540",
-  appId: "854913873540"
+  appId: "854913873540",
 };
