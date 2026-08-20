@@ -2,13 +2,20 @@
 
 Een kleurrijke, live-synchroniserende restaurant-bestelapp: klik "Restaurant starten" of "Restaurant joinen" met een code. Werkt op meerdere apparaten tegelijk (bijv. een tablet bij de bestellingen en een scherm in de keuken) via een gratis Firebase-database.
 
+## Twee versies — gebruik er maar één
+
+- **`index-standalone.html`** — alles (HTML + CSS + JS) in één bestand. Gebruik dit als je snel wil testen (bijv. door 'm gewoon te dubbelklikken) of als je het simpel wil houden: één bestand uploaden naar GitHub is genoeg.
+- **`index.html` + `style.css` + `app.js` + `firebase-config.js`** — dezelfde site, maar netjes uitgesplitst in losse bestanden. Functioneel identiek, alleen handiger als je zelf verder wil aanpassen aan de code. **Let op:** deze versie moet je echt hosten (GitHub Pages of een lokale webserver) — als je alleen het los bestand opent of bekijkt in een preview die geen bijbehorende bestanden laadt, valt de styling weg en lijkt de site "kapot" (alles onder elkaar, geen opmaak). Twijfel je? Gebruik dan `index-standalone.html`.
+
 ## Wat zit erin
 
-- `index.html` — alle schermen (start, restaurant maken/joinen, bestellen, keuken, historie, voorraad, instellingen)
-- `style.css` — de styling
-- `app.js` — alle logica en de live-koppeling met Firebase
-- `firebase-config.js` — **hier vul jij je eigen Firebase-gegevens in**
+- `index-standalone.html` — de complete site in één bestand (aanbevolen)
+- `index.html` — alle schermen, losse-bestanden versie
+- `style.css` — de styling (alleen voor de losse-bestanden versie)
+- `app.js` — alle logica en de live-koppeling met Firebase (alleen voor de losse-bestanden versie)
+- `firebase-config.js` — **hier vul jij je eigen Firebase-gegevens in** (losse-bestanden versie; in de standalone versie staat dit blok bovenin het bestand zelf)
 - `firestore.rules` — voorbeeld beveiligingsregels voor je Firestore-database
+- `.nojekyll` — leeg bestand dat voorkomt dat GitHub Pages de site via Jekyll probeert te verwerken (kan anders soms bestanden negeren of paden verstoren)
 
 ## Stap 1 — Firebase-project aanmaken (gratis)
 
@@ -23,7 +30,9 @@ Een kleurrijke, live-synchroniserende restaurant-bestelapp: klik "Restaurant sta
 
 ## Stap 2 — Config invullen
 
-Open `firebase-config.js` en plak je eigen gegevens in plaats van de `JOUW_...` placeholders:
+**Gebruik je `index-standalone.html`?** Open het bestand in een teksteditor (bijv. Kladblok, VS Code of Kladblok++), zoek naar `firebaseConfig` bovenin het `<script>`-blok, en vul daar je gegevens in.
+
+**Gebruik je de losse bestanden?** Open `firebase-config.js` en plak je eigen gegevens in plaats van de `JOUW_...` placeholders:
 
 ```js
 const firebaseConfig = {
@@ -60,3 +69,10 @@ Standaard staat een Firestore in test-mode zichzelf na 30 dagen dicht. Ga naar *
 - **Instellingen** → voeg producten toe met je eigen naam + emoji, kies of het een ijs-keuze heeft, bekijk/kopieer je aansluitcode. Er is bewust geen prijsveld.
 
 Elk apparaat dat dezelfde code gebruikt, ziet dezelfde live gegevens — dankzij Firebase's real-time database hoeft niemand te verversen.
+
+## Problemen oplossen
+
+- **Alles staat onder elkaar / geen kleuren of opmaak** → de styling laadt niet. Gebruik `index-standalone.html`, of zorg dat je de losse-bestanden versie via een echte webserver bekijkt (GitHub Pages, of lokaal met bijv. `python3 -m http.server`) — niet via een preview die alleen het HTML-bestand zelf laadt.
+- **Rode balk bovenaan "Firebase is nog niet ingesteld"** → je hebt `firebaseConfig` nog niet ingevuld met je eigen gegevens (stap 2).
+- **Restaurant maken/joinen doet niets, of geeft een foutmelding** → open de browserconsole (F12 → tab "Console") en kijk naar de foutmelding. Meestal betekent dit dat de Firestore-database nog niet is aangemaakt (stap 1.3) of dat de rules nog niet gepubliceerd zijn (stap 3).
+- **Werkt lokaal wel maar niet op GitHub Pages** → controleer of alle bestanden echt geüpload zijn en of Pages naar de juiste branch/map wijst (stap 4).
