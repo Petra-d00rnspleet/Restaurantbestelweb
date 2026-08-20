@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restaurant Bestelsysteem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===================== START SCHERM ===================== -->
+<div id="view-start" class="centered-screen">
+  <div class="card">
+    <div class="emoji-big">🍽️</div>
+    <h1>Restaurant Bestelsysteem</h1>
+    <p class="sub">Start een nieuw restaurant of join er eentje met een code</p>
+    <div class="stack">
+      <button class="btn btn-coral" id="goCreateBtn">🏠 Restaurant starten</button>
+      <button class="btn btn-teal" id="goJoinBtn">🔑 Restaurant joinen</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== RESTAURANT MAKEN ===================== -->
+<div id="view-create" class="centered-screen hidden">
+  <div class="card">
+    <div class="emoji-big">🏠</div>
+    <h1>Restaurant starten</h1>
+    <p class="sub">Geef je restaurant een naam</p>
+    <div class="field">
+      <label>Naam van je restaurant</label>
+      <input type="text" id="createNameInput" placeholder="Bijv. Bistro De Zon">
+    </div>
+    <button class="btn btn-coral" id="createSubmitBtn" style="width:100%;">Aanmaken</button>
+    <div class="error-msg" id="createError"></div>
+    <button class="back-link" id="createBackBtn">← Terug</button>
+  </div>
+</div>
+
+<!-- ===================== RESTAURANT JOINEN ===================== -->
+<div id="view-join" class="centered-screen hidden">
+  <div class="card">
+    <div class="emoji-big">🔑</div>
+    <h1>Restaurant joinen</h1>
+    <p class="sub">Vul de aansluitcode van het restaurant in</p>
+    <div class="field">
+      <label>Code</label>
+      <input type="text" id="joinCodeInput" placeholder="Bijv. AB12CD" style="text-transform:uppercase; letter-spacing:3px; text-align:center; font-weight:800;">
+    </div>
+    <button class="btn btn-teal" id="joinSubmitBtn" style="width:100%;">Joinen</button>
+    <div class="error-msg" id="joinError"></div>
+    <button class="back-link" id="joinBackBtn">← Terug</button>
+  </div>
+</div>
+
+<!-- ===================== HOOFD APP ===================== -->
+<div id="view-app" class="app-shell hidden">
+  <div class="topbar">
+    <div class="brand">
+      <h1 id="restaurantNameLabel">Restaurant</h1>
+      <span class="code-chip" id="topCodeChip">CODE</span>
+    </div>
+    <button class="btn leave-btn btn-sm" id="leaveBtn">🚪 Ander restaurant</button>
+  </div>
+  <div class="tabbar" id="tabbar">
+    <button class="tab-btn" data-tab="bestellen">🧾 Bestellen</button>
+    <button class="tab-btn" data-tab="keuken">👨‍🍳 Keuken</button>
+    <button class="tab-btn" data-tab="historie">📜 Historie</button>
+    <button class="tab-btn" data-tab="voorraad">📦 Voorraad</button>
+    <button class="tab-btn" data-tab="instellingen">⚙️ Instellingen</button>
+  </div>
+
+  <!-- ---------- TAB: BESTELLEN ---------- -->
+  <div class="view-panel tab-panel" id="tab-bestellen">
+    <h2 class="section-title">Nieuwe bestelling</h2>
+    <div class="order-layout">
+      <div>
+        <div class="product-grid" id="orderProductGrid"></div>
+      </div>
+      <div class="cart-panel">
+        <h3>🛒 Huidige bestelling</h3>
+        <div id="cartList"></div>
+        <div class="field" style="margin-top:14px;">
+          <label style="font-weight:800; font-size:0.8rem; color:var(--teal-dark); display:block; margin-bottom:6px;">Opmerking (optioneel)</label>
+          <textarea id="orderNote" rows="2" placeholder="Bijv. tafel 5, extra saus..."></textarea>
+        </div>
+        <button class="btn btn-coral" id="submitOrderBtn" style="width:100%; margin-top:10px;">✅ Bestellen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- TAB: KEUKEN ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-keuken">
+    <h2 class="section-title">Keuken</h2>
+    <div class="kanban">
+      <div class="kanban-col">
+        <h3>🆕 Nieuw <span class="count" id="countNieuw">0</span></h3>
+        <div id="colNieuw"></div>
+      </div>
+      <div class="kanban-col">
+        <h3>🔥 In bereiding <span class="count" id="countBereiden">0</span></h3>
+        <div id="colBereiden"></div>
+      </div>
+      <div class="kanban-col">
+        <h3>✅ Klaar (bezorgen) <span class="count" id="countKlaar">0</span></h3>
+        <div id="colKlaar"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ---------- TAB: HISTORIE ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-historie">
+    <div class="history-toolbar">
+      <h2 class="section-title" style="margin:0;">Historie</h2>
+      <button class="btn btn-danger btn-sm" id="clearHistoryBtn">🗑️ Historie verwijderen</button>
+    </div>
+    <h3 style="color:var(--teal-dark);">Totaal overzicht</h3>
+    <table class="totals-table" id="totalsTable">
+      <thead><tr><th>Product</th><th>IJs</th><th>Aantal besteld</th></tr></thead>
+      <tbody id="totalsTableBody"></tbody>
+    </table>
+    <h3 style="color:var(--teal-dark);">Alle bestellingen</h3>
+    <div id="historyList"></div>
+  </div>
+
+  <!-- ---------- TAB: VOORRAAD ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-voorraad">
+    <h2 class="section-title">Voorraad</h2>
+    <div class="stock-list" id="stockList"></div>
+  </div>
+
+  <!-- ---------- TAB: INSTELLINGEN ---------- -->
+  <div class="view-panel tab-panel hidden" id="tab-instellingen">
+    <h2 class="section-title">Instellingen</h2>
+    <div class="settings-grid">
+      <div class="panel-box">
+        <h3>🔑 Aansluitcode</h3>
+        <p class="muted" style="font-size:0.85rem;">Deel deze code om anderen te laten joinen op dit restaurant.</p>
+        <div class="code-display" id="settingsCodeDisplay">------</div>
+        <button class="btn btn-outline btn-sm" id="copyCodeBtn" style="width:100%; margin-top:10px;">📋 Kopieer code</button>
+
+        <h3 style="margin-top:22px;">➕ Product toevoegen</h3>
+        <div class="field">
+          <label>Naam</label>
+          <input type="text" id="newProductName" placeholder="Bijv. Cola">
+        </div>
+        <div class="field">
+          <label>Emoji</label>
+          <input type="text" id="newProductEmoji" placeholder="Plak of typ een emoji, bijv. 🥤" maxlength="4">
+          <div class="emoji-picker" id="emojiQuickPick"></div>
+        </div>
+        <label class="checkbox" style="margin-bottom:14px;">
+          <input type="checkbox" id="newProductIce"> Heeft een ijs-keuze (met / zonder ijs)
+        </label>
+        <button class="btn btn-teal" id="addProductBtn" style="width:100%;">Product toevoegen</button>
+      </div>
+
+      <div class="panel-box">
+        <h3>📋 Producten beheren</h3>
+        <div id="manageProductsList"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="modalRoot"></div>
+<div id="toast" class="toast"></div>
+
+<!-- Firebase (compat SDK, geen build-tools nodig) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
