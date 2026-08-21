@@ -11,11 +11,11 @@
 //    die staat er ook bij)
 // ============================================================
 const firebaseConfig = {
-  apiKey: "JOUW_API_KEY",
-  authDomain: "JOUW_PROJECT.firebaseapp.com",
-  databaseURL: "https://JOUW_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "JOUW_PROJECT_ID",
-  storageBucket: "JOUW_PROJECT.appspot.com",
-  messagingSenderId: "JOUW_SENDER_ID",
-  appId: "JOUW_APP_ID"
+  apiKey: "AIzaSyCKSu7jHB6WmXpC2s3e-fmYqHUl2hGETfE",
+  authDomain: "sara-4dc17.firebaseapp.com",
+  databaseURL: "https://sara-4dc17-default-rtdb.europe-west1.firebasedatabase.app/",
+  projectId: "sara-4dc17",
+  storageBucket: "sara-4dc17.firebasestorage.app",
+  messagingSenderId: "854913873540",
+  appId: "1:854913873540:web:873fb076dde7aee281f4d1"
 };
