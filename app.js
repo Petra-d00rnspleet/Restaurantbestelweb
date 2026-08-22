@@ -14,11 +14,13 @@ const state = {
   restaurantNaam: localStorage.getItem("ticket_naam") || null,
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken | joinen
-  huidigeView: "bestellen",   // bestellen | keuken | bezorgen | instellingen
+  huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
   menu: {},
   bestellingen: {},
-  updates: {},
-  winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji} }
+  historie: {},
+  siteUpdates: {},
+  beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
+  winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
   tafel: "",
   foutmelding: "",
   nieuwProductEmoji: "🍽️",
@@ -26,7 +28,17 @@ const state = {
 };
 
 const MERKNAAM = "Ticket";
-const EMOJIS = ["🍔","🍕","🌭","🥪","🌮","🌯","🥗","🍝","🍜","🍣","🍱","🍤","🍗","🥩","🍟","🍰","🧁","🍩","🍪","🍦","🥤","☕","🍺","🍷"];
+
+// Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
+const BEHEERDER_WACHTWOORD = "verander-dit-wachtwoord";
+
+const EMOJI_CATEGORIEEN = {
+  "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙"],
+  "Warme maaltijd": ["🍝","🍜","🍲","🍛","🍱","🍣","🥘","🫕","🍳","🥟"],
+  "Groente & fruit": ["🥗","🍎","🍌","🍊","🍇","🍓","🍉","🥑","🥕","🍒","🍍","🥝","🍑","🥭"],
+  "Bakkerij & zoet": ["🍰","🧁","🍩","🍪","🍦","🍫","🍮","🥧","🥐","🍯"],
+  "Dranken": ["🥤","☕","🍺","🍷","🍹","🧃","🍵","🥃","🧉","🥛"],
+};
 
 // ---------- helpers ----------
 function opslaanRestaurant(code, naam){
@@ -40,7 +52,7 @@ function restaurantVerlaten(){
   localStorage.removeItem("ticket_naam");
   db.ref("restaurants/" + state.restaurantCode + "/menu").off();
   db.ref("restaurants/" + state.restaurantCode + "/bestellingen").off();
-  db.ref("restaurants/" + state.restaurantCode + "/updates").off();
+  db.ref("restaurants/" + state.restaurantCode + "/historie").off();
   state.restaurantCode = null;
   state.restaurantNaam = null;
   state.actiefInRestaurant = false;
@@ -104,8 +116,8 @@ function startRestaurant(){
     state.bestellingen = snap.val() || {};
     render();
   });
-  db.ref("restaurants/" + code + "/updates").on("value", snap => {
-    state.updates = snap.val() || {};
+  db.ref("restaurants/" + code + "/historie").on("value", snap => {
+    state.historie = snap.val() || {};
     render();
   });
   render();
@@ -131,8 +143,24 @@ function statusBijwerken(orderId, status){
     bijgewerkt: firebase.database.ServerValue.TIMESTAMP,
   });
 }
-function bestellingArchiveren(orderId){
-  db.ref("restaurants/" + state.restaurantCode + "/bestellingen/" + orderId).remove();
+function bestellingBezorgd(orderId){
+  const bestelling = state.bestellingen[orderId];
+  if(!bestelling) return;
+  db.ref("restaurants/" + state.restaurantCode + "/historie/" + orderId).set({
+    ...bestelling,
+    status: "bezorgd",
+    bezorgd: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => {
+    db.ref("restaurants/" + state.restaurantCode + "/bestellingen/" + orderId).remove();
+    toonToast("Bestelling bezorgd en toegevoegd aan historie");
+  });
+}
+function historieVerwijderen(id){
+  db.ref("restaurants/" + state.restaurantCode + "/historie/" + id).remove();
+}
+function historieWissen(){
+  if(!confirm("Weet je zeker dat je de hele geschiedenis van dit restaurant wilt wissen? Dit kan niet ongedaan gemaakt worden.")) return;
+  db.ref("restaurants/" + state.restaurantCode + "/historie").remove();
 }
 function menuItemToevoegen(naam, prijs, categorie, emoji){
   if(!naam.trim() || !prijs) return;
@@ -146,13 +174,37 @@ function menuItemToevoegen(naam, prijs, categorie, emoji){
 function menuItemVerwijderen(id){
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).remove();
 }
-function updateToevoegen(tekst){
+
+// ---------- systeemupdates (site-breed, alleen beheerder mag schrijven) ----------
+function beheerderInloggen(){
+  const invoer = prompt("Beheerderswachtwoord:");
+  if(invoer === null) return;
+  if(invoer === BEHEERDER_WACHTWOORD){
+    localStorage.setItem("ticket_beheerder", "1");
+    state.beheerderActief = true;
+    toonToast("Ingelogd als beheerder");
+    render();
+  } else {
+    toonToast("Onjuist wachtwoord");
+  }
+}
+function beheerderUitloggen(){
+  localStorage.removeItem("ticket_beheerder");
+  state.beheerderActief = false;
+  render();
+}
+function siteUpdateToevoegen(tekst){
+  if(!state.beheerderActief) return;
   tekst = tekst.trim();
   if(!tekst) return;
-  db.ref("restaurants/" + state.restaurantCode + "/updates").push().set({
+  db.ref("site_updates").push().set({
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   });
+}
+function siteUpdateVerwijderen(id){
+  if(!state.beheerderActief) return;
+  db.ref("site_updates/" + id).remove();
 }
 
 // ---------- winkelwagen ----------
@@ -160,7 +212,7 @@ function toevoegenAanWagen(id, item){
   if(state.winkelwagen[id]){
     state.winkelwagen[id].aantal += 1;
   } else {
-    state.winkelwagen[id] = { naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", aantal:1, notitie:"" };
+    state.winkelwagen[id] = { naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", categorie:item.categorie||"Overig", aantal:1, notitie:"" };
   }
   render();
 }
@@ -198,6 +250,12 @@ function renderLanding(){
     </div>`;
 
   if(state.landingScherm === "start"){
+    const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0)).slice(0,2);
+    const nieuwsHtml = siteUpdatesArr.length ? `
+      <div class="nieuws-teaser">
+        <div class="nieuws-teaser__titel">Nieuw in Ticket</div>
+        ${siteUpdatesArr.map(([,u]) => `<div class="nieuws-teaser__regel">${u.tekst}</div>`).join("")}
+      </div>` : "";
     root.innerHTML = `
       <div class="landing">
         ${merk}
@@ -218,6 +276,7 @@ function renderLanding(){
             <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant.</p>
           </button>
         </div>
+        ${nieuwsHtml}
       </div>`;
   } else if(state.landingScherm === "maken"){
     root.innerHTML = `
@@ -269,6 +328,7 @@ function renderDashboard(){
         <button class="tab ${state.huidigeView==='bestellen'?'actief':''}" data-action="wissel-view" data-view="bestellen">Bestellen</button>
         <button class="tab ${state.huidigeView==='keuken'?'actief':''}" data-action="wissel-view" data-view="keuken">Keuken ${aantalNieuw?`<span class="badge">${aantalNieuw}</span>`:""}</button>
         <button class="tab ${state.huidigeView==='bezorgen'?'actief':''}" data-action="wissel-view" data-view="bezorgen">Bezorgen ${aantalKlaar?`<span class="badge">${aantalKlaar}</span>`:""}</button>
+        <button class="tab ${state.huidigeView==='historie'?'actief':''}" data-action="wissel-view" data-view="historie">Historie</button>
         <button class="tab ${state.huidigeView==='instellingen'?'actief':''}" data-action="wissel-view" data-view="instellingen">Instellingen</button>
       </nav>
       <main class="view" id="view-inhoud"></main>
@@ -278,6 +338,7 @@ function renderDashboard(){
   if(state.huidigeView === "bestellen") inhoud.innerHTML = renderBestellen();
   else if(state.huidigeView === "keuken") inhoud.innerHTML = renderKeuken();
   else if(state.huidigeView === "bezorgen") inhoud.innerHTML = renderBezorgen();
+  else if(state.huidigeView === "historie") inhoud.innerHTML = renderHistorie();
   else if(state.huidigeView === "instellingen") inhoud.innerHTML = renderInstellingen();
 }
 
@@ -407,6 +468,64 @@ function renderBezorgen(){
     </div>`;
 }
 
+function renderHistorie(){
+  const historieArr = Object.entries(state.historie || {})
+    .sort((a,b) => (b[1].bezorgd||b[1].aangemaakt||0) - (a[1].bezorgd||a[1].aangemaakt||0));
+
+  const tellingen = {};
+  historieArr.forEach(([,b]) => {
+    (b.items||[]).forEach(it => {
+      const cat = it.categorie || "Overig";
+      tellingen[cat] = (tellingen[cat]||0) + (it.aantal||0);
+    });
+  });
+  const tellingenArr = Object.entries(tellingen).sort((a,b) => b[1]-a[1]);
+
+  const tabelHtml = tellingenArr.length ? `
+    <table class="historie-tabel">
+      <thead><tr><th>Categorie</th><th>Aantal besteld</th></tr></thead>
+      <tbody>
+        ${tellingenArr.map(([cat,aantal]) => `<tr><td>${cat}</td><td>${aantal}×</td></tr>`).join("")}
+      </tbody>
+    </table>` : `<div class="leeg">Nog geen geschiedenis om te tellen.</div>`;
+
+  const lijstHtml = historieArr.map(([id,b]) => {
+    const tijd = b.bezorgd ? new Date(b.bezorgd).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    const items = (b.items||[]).map(it => `
+      <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
+        ${it.notitie ? `<span class="ticket__item-notitie">— ${it.notitie}</span>` : ""}
+      </li>`).join("");
+    return `
+      <div class="ticket">
+        <div class="ticket__top">
+          <div class="ticket__nr">#${id.slice(-5).toUpperCase()}</div>
+          <div class="ticket__tijd">${tijd}</div>
+        </div>
+        ${b.tafel ? `<div class="ticket__tafel">${b.tafel}</div>` : ""}
+        <ul class="ticket__items">${items}</ul>
+        <button class="wagen__verwijder" data-action="historie-verwijder" data-id="${id}">verwijderen</button>
+      </div>`;
+  }).join("");
+
+  return `
+    <h2 class="view-titel">Historie</h2>
+
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Bestellingen per categorie</div>
+      ${tabelHtml}
+    </div>
+
+    <div class="instel-blok">
+      <div class="instel-blok__titel" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>Alle bezorgde bestellingen (${historieArr.length})</span>
+        ${historieArr.length ? `<button class="btn btn--ghost btn--sm" data-action="historie-wissen">Hele historie wissen</button>` : ""}
+      </div>
+      <div class="ticket-stack">
+        ${lijstHtml || `<div class="leeg">Nog geen bezorgde bestellingen.</div>`}
+      </div>
+    </div>`;
+}
+
 function renderInstellingen(){
   const menuArr = Object.entries(state.menu || {});
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
@@ -420,13 +539,24 @@ function renderInstellingen(){
 
   const emojiGrid = state.emojiPickerOpen ? `
     <div class="emoji-grid">
-      ${EMOJIS.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
+      ${Object.entries(EMOJI_CATEGORIEEN).map(([cat, lijst]) => `
+        <div class="emoji-grid__categorie">${cat}</div>
+        <div class="emoji-grid__rij">
+          ${lijst.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
+        </div>
+      `).join("")}
     </div>` : "";
 
-  const updatesArr = Object.entries(state.updates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const updatesHtml = updatesArr.length ? updatesArr.map(([,u]) => {
+  const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
+  const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
     const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-    return `<li><span class="update-lijst__datum">${datum}</span><span>${u.tekst}</span></li>`;
+    return `<li>
+      <div>
+        <span class="update-lijst__datum">${datum}</span>
+        <span>${u.tekst}</span>
+      </div>
+      ${state.beheerderActief ? `<button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}">✕</button>` : ""}
+    </li>`;
   }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
 
   return `
@@ -457,12 +587,19 @@ function renderInstellingen(){
     </div>
 
     <div class="instel-blok">
-      <div class="instel-blok__titel">Updatelog</div>
-      <div class="menu-form" style="grid-template-columns:1fr auto;">
-        <input id="update-tekst" placeholder="Wat is er veranderd?">
-        <button class="btn btn--flame" data-action="update-toevoegen">Plaatsen</button>
+      <div class="instel-blok__titel" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>Systeemupdates</span>
+        ${state.beheerderActief
+          ? `<button class="terug-link" style="margin:0;" data-action="beheerder-uitloggen">Uitloggen als beheerder</button>`
+          : `<button class="terug-link" style="margin:0;" data-action="beheerder-inloggen">Inloggen als beheerder</button>`}
       </div>
-      <ul class="update-lijst">${updatesHtml}</ul>
+      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Zichtbaar voor iedereen die Ticket gebruikt — alleen de beheerder van de website kan hier iets plaatsen.</p>
+      ${state.beheerderActief ? `
+        <div class="menu-form" style="grid-template-columns:1fr auto;">
+          <input id="site-update-tekst" placeholder="Wat is er veranderd?">
+          <button class="btn btn--flame" data-action="site-update-toevoegen">Plaatsen</button>
+        </div>` : ""}
+      <ul class="update-lijst">${siteUpdatesHtml}</ul>
     </div>
 
     <div class="instel-blok">
@@ -503,7 +640,17 @@ root.addEventListener("click", e => {
 
     case "start-bereiden": statusBijwerken(id, "bereiden"); break;
     case "bereiden-klaar": statusBijwerken(id, "klaar"); break;
-    case "markeer-bezorgd": bestellingArchiveren(id); toonToast("Bestelling bezorgd"); break;
+    case "markeer-bezorgd": bestellingBezorgd(id); break;
+
+    case "historie-verwijder": historieVerwijderen(id); break;
+    case "historie-wissen": historieWissen(); break;
+
+    case "beheerder-inloggen": beheerderInloggen(); break;
+    case "beheerder-uitloggen": beheerderUitloggen(); break;
+    case "site-update-toevoegen":
+      siteUpdateToevoegen(document.getElementById("site-update-tekst").value);
+      break;
+    case "site-update-verwijder": siteUpdateVerwijderen(id); break;
 
     case "emoji-toggle": state.emojiPickerOpen = !state.emojiPickerOpen; render(); break;
     case "emoji-kies": state.nieuwProductEmoji = el.dataset.emoji; state.emojiPickerOpen = false; render(); break;
@@ -519,11 +666,6 @@ root.addEventListener("click", e => {
       render();
       break;
     case "menu-verwijder": menuItemVerwijderen(id); break;
-
-    case "update-toevoegen":
-      updateToevoegen(document.getElementById("update-tekst").value);
-      render();
-      break;
   }
 });
 
@@ -539,4 +681,9 @@ root.addEventListener("input", e => {
 // ============================================================
 // START
 // ============================================================
+// Systeemupdates zijn site-breed en dus altijd actief, ook als er nog geen restaurant gekozen is.
+db.ref("site_updates").on("value", snap => {
+  state.siteUpdates = snap.val() || {};
+  render();
+});
 render();
