@@ -281,6 +281,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   cursor:pointer;
 }
 .topbar__code:hover{ border-color:var(--flame); color:var(--text); }
+.topbar__gebruiker{
+  font-family:var(--mono);
+  font-size:.75rem;
+  color:var(--text-dim);
+}
 
 .tabs{
   display:flex;
@@ -694,6 +699,69 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   letter-spacing:.03em;
   margin-right:8px;
 }
+.update-lijst__titel{
+  font-weight:700;
+  margin-right:6px;
+}
+
+.update-form{ display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+.update-form input{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:9px 11px;
+  font-size:.88rem;
+}
+.update-form__row{ display:flex; gap:10px; }
+.update-form__row input{ flex:1; }
+
+/* ============================================================
+   TEAM & RECHTEN
+   ============================================================ */
+.team-lijst{ display:flex; flex-direction:column; gap:4px; }
+.team-rij{
+  display:grid;
+  grid-template-columns:140px 170px 1fr auto;
+  gap:12px;
+  align-items:center;
+  padding:12px 0;
+  border-bottom:1px solid var(--line);
+}
+.team-rij:last-child{ border-bottom:none; }
+@media (max-width:820px){
+  .team-rij{ grid-template-columns:1fr; }
+}
+.team-rij__naam{ font-weight:600; font-size:.9rem; }
+.team-rij__badge{
+  font-family:var(--mono);
+  font-size:.62rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--flame);
+  border:1px solid var(--flame-dark);
+  border-radius:10px;
+  padding:1px 7px;
+  margin-left:6px;
+}
+.team-rij__functie{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:7px 9px;
+  font-size:.82rem;
+}
+.team-rij__rechten{
+  display:flex; flex-wrap:wrap; gap:10px 14px;
+}
+.team-recht{
+  display:flex; align-items:center; gap:5px;
+  font-family:var(--mono);
+  font-size:.72rem;
+  color:var(--text-dim);
+}
+.team-recht input{ accent-color:var(--flame); }
 
 .historie-tabel{
   width:100%;
