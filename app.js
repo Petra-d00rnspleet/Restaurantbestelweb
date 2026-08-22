@@ -1,5 +1,5 @@
 /* ============================================================
-   TICKET — app.js
+   RESTAURANTS — app.js
    Alle logica: routing, Firebase Realtime Database sync,
    en het renderen van elk scherm.
    ============================================================ */
@@ -12,12 +12,16 @@ const root = document.getElementById("app");
 const state = {
   restaurantCode: localStorage.getItem("ticket_code") || null,
   restaurantNaam: localStorage.getItem("ticket_naam") || null,
+  ledId: localStorage.getItem("ticket_lid_id") || null,       // jouw teamlid-id binnen dit restaurant
+  gebruikersNaam: localStorage.getItem("ticket_lid_naam") || null, // jouw eigen naam
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken | joinen
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
   menu: {},
   bestellingen: {},
   historie: {},
+  leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
+  ledenGeladen: false,
   siteUpdates: {},
   beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
   winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
@@ -27,10 +31,20 @@ const state = {
   emojiPickerOpen: false,
 };
 
-const MERKNAAM = "Ticket";
+const MERKNAAM = "Restaurants";
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
 const BEHEERDER_WACHTWOORD = "Sanipi123";
+
+// Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
+const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
+const RECHTEN_DEFINITIES = [
+  { key:"bestellen",    label:"Bestellen" },
+  { key:"keuken",       label:"Keuken" },
+  { key:"bezorgen",     label:"Bezorgen" },
+  { key:"historie",     label:"Historie" },
+  { key:"instellingen", label:"Instellingen" },
+];
 
 const EMOJI_CATEGORIEEN = {
   "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙"],
@@ -47,18 +61,41 @@ function opslaanRestaurant(code, naam){
   localStorage.setItem("ticket_code", code);
   localStorage.setItem("ticket_naam", naam);
 }
+function opslaanLid(ledId, naam){
+  state.ledId = ledId;
+  state.gebruikersNaam = naam;
+  localStorage.setItem("ticket_lid_id", ledId);
+  localStorage.setItem("ticket_lid_naam", naam);
+}
 function restaurantVerlaten(){
   localStorage.removeItem("ticket_code");
   localStorage.removeItem("ticket_naam");
+  localStorage.removeItem("ticket_lid_id");
+  localStorage.removeItem("ticket_lid_naam");
   db.ref("restaurants/" + state.restaurantCode + "/menu").off();
   db.ref("restaurants/" + state.restaurantCode + "/bestellingen").off();
   db.ref("restaurants/" + state.restaurantCode + "/historie").off();
+  db.ref("restaurants/" + state.restaurantCode + "/leden").off();
   state.restaurantCode = null;
   state.restaurantNaam = null;
+  state.ledId = null;
+  state.gebruikersNaam = null;
+  state.leden = {};
+  state.ledenGeladen = false;
   state.actiefInRestaurant = false;
   state.landingScherm = "start";
   state.winkelwagen = {};
   render();
+}
+// Bepaalt of het huidige teamlid een bepaald recht heeft (of alles mag, als eigenaar).
+// Zolang de ledenlijst nog niet is geladen (of je eigen lid nog niet gevonden is,
+// bijv. vlak na het aanmaken van een restaurant) wordt toegang tijdelijk toegestaan.
+function heeftRecht(sleutel){
+  if(!state.ledenGeladen) return true;
+  const lid = state.leden[state.ledId];
+  if(!lid) return true;
+  if(lid.eigenaar) return true;
+  return !!(lid.rechten && lid.rechten[sleutel]);
 }
 function genereerCode(){
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // zonder verwarrende tekens
@@ -78,29 +115,53 @@ function toonToast(tekst){
 }
 
 // ---------- firebase acties ----------
-function restaurantMaken(naam){
+function restaurantMaken(naam, eigenNaam){
   naam = naam.trim();
-  if(!naam){ state.foutmelding = "Vul een naam in."; render(); return; }
+  eigenNaam = (eigenNaam || "").trim();
+  if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
+  if(!eigenNaam){ state.foutmelding = "Vul je eigen naam in."; render(); return; }
   const code = genereerCode();
   db.ref("restaurants/" + code).set({
     naam: naam,
     aangemaakt: firebase.database.ServerValue.TIMESTAMP,
     menu: {},
   }).then(() => {
+    const ledRef = db.ref("restaurants/" + code + "/leden").push();
+    return ledRef.set({
+      naam: eigenNaam,
+      functie: "Eigenaar",
+      eigenaar: true,
+      rechten: { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true },
+      aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+    }).then(() => ledRef.key);
+  }).then(ledId => {
+    opslaanLid(ledId, eigenNaam);
     opslaanRestaurant(code, naam);
     startRestaurant();
   });
 }
-function restaurantJoinen(codeInvoer){
+function restaurantJoinen(codeInvoer, eigenNaam){
   const code = codeInvoer.trim().toUpperCase();
+  eigenNaam = (eigenNaam || "").trim();
   if(!code){ state.foutmelding = "Vul een code in."; render(); return; }
+  if(!eigenNaam){ state.foutmelding = "Vul je naam in."; render(); return; }
   db.ref("restaurants/" + code).once("value").then(snap => {
     if(!snap.exists()){
       state.foutmelding = "Geen restaurant gevonden met code " + code + ".";
       render();
     } else {
-      opslaanRestaurant(code, snap.val().naam);
-      startRestaurant();
+      const ledRef = db.ref("restaurants/" + code + "/leden").push();
+      ledRef.set({
+        naam: eigenNaam,
+        functie: "",
+        eigenaar: false,
+        rechten: { ...STANDAARD_RECHTEN },
+        aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+      }).then(() => {
+        opslaanLid(ledRef.key, eigenNaam);
+        opslaanRestaurant(code, snap.val().naam);
+        startRestaurant();
+      });
     }
   });
 }
@@ -118,6 +179,11 @@ function startRestaurant(){
   });
   db.ref("restaurants/" + code + "/historie").on("value", snap => {
     state.historie = snap.val() || {};
+    render();
+  });
+  db.ref("restaurants/" + code + "/leden").on("value", snap => {
+    state.leden = snap.val() || {};
+    state.ledenGeladen = true;
     render();
   });
   render();
@@ -175,6 +241,18 @@ function menuItemVerwijderen(id){
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).remove();
 }
 
+// ---------- team & rechten (alleen te beheren door de eigenaar van het restaurant) ----------
+function ledFunctieWijzigen(ledId, functie){
+  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/functie").set(functie.trim());
+}
+function ledRechtToggle(ledId, recht, waarde){
+  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/rechten/" + recht).set(waarde);
+}
+function ledVerwijderen(ledId){
+  if(!confirm("Dit teamlid verwijderen? Diegene moet opnieuw joinen om weer toegang te krijgen.")) return;
+  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
+}
+
 // ---------- systeemupdates (site-breed, alleen beheerder mag schrijven) ----------
 function beheerderInloggen(){
   const invoer = prompt("Beheerderswachtwoord:");
@@ -193,11 +271,13 @@ function beheerderUitloggen(){
   state.beheerderActief = false;
   render();
 }
-function siteUpdateToevoegen(tekst){
+function siteUpdateToevoegen(titel, tekst){
   if(!state.beheerderActief) return;
+  titel = (titel || "").trim();
   tekst = tekst.trim();
   if(!tekst) return;
   db.ref("site_updates").push().set({
+    titel: titel,
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   });
@@ -253,8 +333,8 @@ function renderLanding(){
     const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0)).slice(0,2);
     const nieuwsHtml = siteUpdatesArr.length ? `
       <div class="nieuws-teaser">
-        <div class="nieuws-teaser__titel">Nieuw in Ticket</div>
-        ${siteUpdatesArr.map(([,u]) => `<div class="nieuws-teaser__regel">${u.tekst}</div>`).join("")}
+        <div class="nieuws-teaser__titel">Nieuw in ${MERKNAAM}</div>
+        ${siteUpdatesArr.map(([,u]) => `<div class="nieuws-teaser__regel">${u.titel ? `<b>${u.titel}</b> — ` : ""}${u.tekst}</div>`).join("")}
       </div>` : "";
     root.innerHTML = `
       <div class="landing">
@@ -285,14 +365,19 @@ function renderLanding(){
         <div class="form-card">
           <label class="form-card__label">Naam van je restaurant</label>
           <input id="input-naam" type="text" placeholder="Bijv. De Gouden Pan" autofocus>
+          <label class="form-card__label">Jouw naam</label>
+          <input id="input-eigen-naam-maken" type="text" placeholder="Bijv. Sara">
           ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="maak-restaurant">Restaurant aanmaken</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
       </div>`;
-    document.getElementById("input-naam").addEventListener("keydown", e => {
-      if(e.key === "Enter") restaurantMaken(e.target.value);
-    });
+    const verstuurMaken = () => restaurantMaken(
+      document.getElementById("input-naam").value,
+      document.getElementById("input-eigen-naam-maken").value
+    );
+    document.getElementById("input-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuurMaken(); });
+    document.getElementById("input-eigen-naam-maken").addEventListener("keydown", e => { if(e.key === "Enter") verstuurMaken(); });
   } else if(state.landingScherm === "joinen"){
     root.innerHTML = `
       <div class="landing">
@@ -300,14 +385,19 @@ function renderLanding(){
         <div class="form-card">
           <label class="form-card__label">Restaurantcode</label>
           <input id="input-code" type="text" placeholder="Bijv. K3F7Q" autofocus style="text-transform:uppercase; letter-spacing:.1em;">
+          <label class="form-card__label">Jouw naam</label>
+          <input id="input-eigen-naam-joinen" type="text" placeholder="Bijv. Sara">
           ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="join-restaurant">Restaurant joinen</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
       </div>`;
-    document.getElementById("input-code").addEventListener("keydown", e => {
-      if(e.key === "Enter") restaurantJoinen(e.target.value);
-    });
+    const verstuurJoinen = () => restaurantJoinen(
+      document.getElementById("input-code").value,
+      document.getElementById("input-eigen-naam-joinen").value
+    );
+    document.getElementById("input-code").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
+    document.getElementById("input-eigen-naam-joinen").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
   }
 }
 
@@ -316,6 +406,24 @@ function renderDashboard(){
   const aantalNieuw = bestellingenArr.filter(([,b]) => b.status === "nieuw").length;
   const aantalKlaar = bestellingenArr.filter(([,b]) => b.status === "klaar").length;
 
+  // Alleen tabbladen tonen waar dit teamlid rechten voor heeft; Instellingen is altijd zichtbaar
+  // (code bekijken / restaurant verlaten kan iedereen).
+  const tabsConfig = [
+    { key:"bestellen", label:"Bestellen" },
+    { key:"keuken", label:`Keuken ${aantalNieuw?`<span class="badge">${aantalNieuw}</span>`:""}` },
+    { key:"bezorgen", label:`Bezorgen ${aantalKlaar?`<span class="badge">${aantalKlaar}</span>`:""}` },
+    { key:"historie", label:"Historie" },
+  ].filter(t => heeftRecht(t.key));
+  tabsConfig.push({ key:"instellingen", label:"Instellingen" });
+
+  if(!tabsConfig.some(t => t.key === state.huidigeView)){
+    state.huidigeView = tabsConfig[0].key;
+  }
+
+  const tabsHtml = tabsConfig.map(t =>
+    `<button class="tab ${state.huidigeView===t.key?'actief':''}" data-action="wissel-view" data-view="${t.key}">${t.label}</button>`
+  ).join("");
+
   root.innerHTML = `
     <div class="shell">
       <header class="topbar">
@@ -323,14 +431,9 @@ function renderDashboard(){
           <div class="topbar__naam">${state.restaurantNaam}</div>
           <button class="topbar__code" data-action="kopieer-code" title="Klik om code te kopiëren">${state.restaurantCode}</button>
         </div>
+        ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
       </header>
-      <nav class="tabs">
-        <button class="tab ${state.huidigeView==='bestellen'?'actief':''}" data-action="wissel-view" data-view="bestellen">Bestellen</button>
-        <button class="tab ${state.huidigeView==='keuken'?'actief':''}" data-action="wissel-view" data-view="keuken">Keuken ${aantalNieuw?`<span class="badge">${aantalNieuw}</span>`:""}</button>
-        <button class="tab ${state.huidigeView==='bezorgen'?'actief':''}" data-action="wissel-view" data-view="bezorgen">Bezorgen ${aantalKlaar?`<span class="badge">${aantalKlaar}</span>`:""}</button>
-        <button class="tab ${state.huidigeView==='historie'?'actief':''}" data-action="wissel-view" data-view="historie">Historie</button>
-        <button class="tab ${state.huidigeView==='instellingen'?'actief':''}" data-action="wissel-view" data-view="instellingen">Instellingen</button>
-      </nav>
+      <nav class="tabs">${tabsHtml}</nav>
       <main class="view" id="view-inhoud"></main>
     </div>`;
 
@@ -553,11 +656,39 @@ function renderInstellingen(){
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
+        ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
         <span>${u.tekst}</span>
       </div>
       ${state.beheerderActief ? `<button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}">✕</button>` : ""}
     </li>`;
   }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
+
+  const eigenLid = state.leden[state.ledId];
+  const isEigenaar = !!(eigenLid && eigenLid.eigenaar);
+  const ledenArr = Object.entries(state.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
+
+  const teamHtml = isEigenaar ? `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Team &amp; rechten</div>
+      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Stel per teamlid een functie en rechten in — dat bepaalt welke tabbladen diegene te zien krijgt.</p>
+      <div class="team-lijst">
+        ${ledenArr.map(([id, lid]) => `
+          <div class="team-rij">
+            <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
+            ${lid.eigenaar ? "" : `
+              <input class="team-rij__functie" placeholder="Functie, bijv. Ober" value="${lid.functie||""}" data-action="functie-wijzigen" data-id="${id}">
+              <div class="team-rij__rechten">
+                ${RECHTEN_DEFINITIES.map(r => `
+                  <label class="team-recht">
+                    <input type="checkbox" data-action="recht-toggle" data-id="${id}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
+                    ${r.label}
+                  </label>`).join("")}
+              </div>
+              <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
+            `}
+          </div>`).join("")}
+      </div>
+    </div>` : "";
 
   return `
     <h2 class="view-titel">Instellingen</h2>
@@ -571,6 +702,7 @@ function renderInstellingen(){
       <p style="color:var(--text-dim); font-size:.82rem; margin-top:12px;">Deel deze code met collega's zodat zij kunnen joinen op hun eigen apparaat.</p>
     </div>
 
+    ${heeftRecht('instellingen') ? `
     <div class="instel-blok">
       <div class="instel-blok__titel">Menu beheren</div>
       <div class="menu-form">
@@ -584,7 +716,9 @@ function renderInstellingen(){
         <button class="btn btn--flame" data-action="menu-toevoegen">Toevoegen</button>
       </div>
       <ul class="menu-lijst">${menuHtml}</ul>
-    </div>
+    </div>` : ""}
+
+    ${teamHtml}
 
     <div class="instel-blok">
       <div class="instel-blok__titel" style="display:flex; justify-content:space-between; align-items:center;">
@@ -593,11 +727,14 @@ function renderInstellingen(){
           ? `<button class="terug-link" style="margin:0;" data-action="beheerder-uitloggen">Uitloggen als beheerder</button>`
           : `<button class="terug-link" style="margin:0;" data-action="beheerder-inloggen">Inloggen als beheerder</button>`}
       </div>
-      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Zichtbaar voor iedereen die Ticket gebruikt — alleen de beheerder van de website kan hier iets plaatsen.</p>
+      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Zichtbaar voor iedereen die ${MERKNAAM} gebruikt — alleen de beheerder van de website kan hier iets plaatsen.</p>
       ${state.beheerderActief ? `
-        <div class="menu-form" style="grid-template-columns:1fr auto;">
-          <input id="site-update-tekst" placeholder="Wat is er veranderd?">
-          <button class="btn btn--flame" data-action="site-update-toevoegen">Plaatsen</button>
+        <div class="update-form">
+          <input id="site-update-titel" placeholder="Titel (optioneel)">
+          <div class="update-form__row">
+            <input id="site-update-tekst" placeholder="Wat is er veranderd?">
+            <button class="btn btn--flame" data-action="site-update-toevoegen">Plaatsen</button>
+          </div>
         </div>` : ""}
       <ul class="update-lijst">${siteUpdatesHtml}</ul>
     </div>
@@ -621,8 +758,18 @@ root.addEventListener("click", e => {
     case "ga-maken": state.landingScherm="maken"; state.foutmelding=""; render(); break;
     case "ga-joinen": state.landingScherm="joinen"; state.foutmelding=""; render(); break;
     case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
-    case "maak-restaurant": restaurantMaken(document.getElementById("input-naam").value); break;
-    case "join-restaurant": restaurantJoinen(document.getElementById("input-code").value); break;
+    case "maak-restaurant":
+      restaurantMaken(
+        document.getElementById("input-naam").value,
+        document.getElementById("input-eigen-naam-maken").value
+      );
+      break;
+    case "join-restaurant":
+      restaurantJoinen(
+        document.getElementById("input-code").value,
+        document.getElementById("input-eigen-naam-joinen").value
+      );
+      break;
     case "doorgaan-restaurant": startRestaurant(); break;
 
     case "wissel-view": state.huidigeView = el.dataset.view; render(); break;
@@ -648,9 +795,14 @@ root.addEventListener("click", e => {
     case "beheerder-inloggen": beheerderInloggen(); break;
     case "beheerder-uitloggen": beheerderUitloggen(); break;
     case "site-update-toevoegen":
-      siteUpdateToevoegen(document.getElementById("site-update-tekst").value);
+      siteUpdateToevoegen(
+        document.getElementById("site-update-titel").value,
+        document.getElementById("site-update-tekst").value
+      );
       break;
     case "site-update-verwijder": siteUpdateVerwijderen(id); break;
+
+    case "lid-verwijderen": ledVerwijderen(id); break;
 
     case "emoji-toggle": state.emojiPickerOpen = !state.emojiPickerOpen; render(); break;
     case "emoji-kies": state.nieuwProductEmoji = el.dataset.emoji; state.emojiPickerOpen = false; render(); break;
@@ -676,6 +828,15 @@ root.addEventListener("input", e => {
   const id = el.dataset.id;
   if(action === "wagen-notitie") wagenNotitieWijzigen(id, el.value);
   if(action === "tafel-invoer") state.tafel = el.value;
+});
+
+root.addEventListener("change", e => {
+  const el = e.target.closest("[data-action]");
+  if(!el) return;
+  const action = el.dataset.action;
+  const id = el.dataset.id;
+  if(action === "recht-toggle") ledRechtToggle(id, el.dataset.recht, el.checked);
+  if(action === "functie-wijzigen") ledFunctieWijzigen(id, el.value);
 });
 
 // ============================================================
