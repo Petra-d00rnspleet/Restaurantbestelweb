@@ -30,7 +30,7 @@ const state = {
 const MERKNAAM = "Ticket";
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
-const BEHEERDER_WACHTWOORD = "verander-dit-wachtwoord";
+const BEHEERDER_WACHTWOORD = "Sanipi123";
 
 const EMOJI_CATEGORIEEN = {
   "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙"],
