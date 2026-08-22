@@ -1,17 +1,32 @@
-# Ticket 🔥 — realtime restaurant bestelsysteem
+# Restaurants 🔥 — realtime restaurant bestelsysteem
 
 Een klein bestelsysteem voor een restaurant: **Bestellen → Keuken → Bezorgen**,
 live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
+- **Restaurant maken/joinen**: bij het maken van een restaurant, én bij het joinen met een code, vul je ook je eigen naam in. Zo weet iedereen wie er in het team zit.
 - **Bestellen**: klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
 - **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
-- **Instellingen**: bekijk/deel de restaurantcode, beheer het menu, en bekijk systeemupdates.
+- **Instellingen**: bekijk/deel de restaurantcode, beheer het menu, beheer het team, en bekijk systeemupdates.
+
+### Team & rechten
+
+Wie een restaurant **maakt**, wordt automatisch **eigenaar** en krijgt alle rechten.
+Iedereen die daarna via de code **joint**, verschijnt in Instellingen onder **Team & rechten**
+— zichtbaar voor de eigenaar. Daar kan de eigenaar per teamlid:
+
+- een **functie** invullen (bijv. "Ober", "Kok", "Manager");
+- **rechten** aan- of uitvinken voor Bestellen, Keuken, Bezorgen, Historie en Instellingen.
+
+De tabbladen die iemand te zien krijgt, worden bepaald door die rechten — iemand zonder
+"Keuken"-recht ziet dat tabblad simpelweg niet. Instellingen (code bekijken, restaurant
+verlaten) blijft voor iedereen zichtbaar; menu beheren en team beheren vereisen het
+"Instellingen"-recht (of eigenaarschap).
 
 ### Beheerderswachtwoord voor systeemupdates
 
-Onder Instellingen staat een **Systeemupdates**-blok dat voor iedereen die de site gebruikt zichtbaar is, maar alleen jij (als bouwer van de site) kunt er iets in plaatsen. Dit werkt met een simpel wachtwoord, ingesteld bovenin `app.js`:
+Onder Instellingen staat een **Systeemupdates**-blok dat voor iedereen die de site gebruikt zichtbaar is, maar alleen jij (als bouwer van de site) kunt er iets in plaatsen — inclusief een optionele **titel** per update. Dit werkt met een simpel wachtwoord, ingesteld bovenin `app.js`:
 
 ```js
 const BEHEERDER_WACHTWOORD = "verander-dit-wachtwoord";
@@ -94,6 +109,13 @@ restaurants/
     naam: "De Gouden Pan"
     menu/
       -Nabc.../ { naam, prijs, categorie }
+    leden/
+      -Nlid.../ {
+        naam: "Sara",
+        functie: "Ober",
+        eigenaar: false,
+        rechten: { bestellen: true, keuken: false, bezorgen: false, historie: false, instellingen: false }
+      }
     bestellingen/
       -Nxyz.../ {
         items: [{ naam, prijs, aantal, notitie }],
