@@ -12,16 +12,21 @@ const root = document.getElementById("app");
 const state = {
   restaurantCode: localStorage.getItem("ticket_code") || null,
   restaurantNaam: localStorage.getItem("ticket_naam") || null,
+  actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken | joinen
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | instellingen
   menu: {},
   bestellingen: {},
-  winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie} }
+  updates: {},
+  winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji} }
   tafel: "",
   foutmelding: "",
+  nieuwProductEmoji: "🍽️",
+  emojiPickerOpen: false,
 };
 
 const MERKNAAM = "Ticket";
+const EMOJIS = ["🍔","🍕","🌭","🥪","🌮","🌯","🥗","🍝","🍜","🍣","🍱","🍤","🍗","🥩","🍟","🍰","🧁","🍩","🍪","🍦","🥤","☕","🍺","🍷"];
 
 // ---------- helpers ----------
 function opslaanRestaurant(code, naam){
@@ -35,8 +40,10 @@ function restaurantVerlaten(){
   localStorage.removeItem("ticket_naam");
   db.ref("restaurants/" + state.restaurantCode + "/menu").off();
   db.ref("restaurants/" + state.restaurantCode + "/bestellingen").off();
+  db.ref("restaurants/" + state.restaurantCode + "/updates").off();
   state.restaurantCode = null;
   state.restaurantNaam = null;
+  state.actiefInRestaurant = false;
   state.landingScherm = "start";
   state.winkelwagen = {};
   render();
@@ -46,20 +53,6 @@ function genereerCode(){
   let code = "";
   for(let i=0;i<5;i++) code += chars[Math.floor(Math.random()*chars.length)];
   return code;
-}
-function standaardMenu(){
-  const items = [
-    { naam:"Cheeseburger", prijs:9.5, categorie:"Hoofdgerecht" },
-    { naam:"Kipburger", prijs:9.0, categorie:"Hoofdgerecht" },
-    { naam:"Margherita pizza", prijs:11.0, categorie:"Hoofdgerecht" },
-    { naam:"Friet", prijs:3.5, categorie:"Bijgerecht" },
-    { naam:"Salade", prijs:4.0, categorie:"Bijgerecht" },
-    { naam:"Cola", prijs:2.5, categorie:"Drank" },
-    { naam:"Water", prijs:2.0, categorie:"Drank" },
-  ];
-  const obj = {};
-  items.forEach(it => { obj[db.ref().push().key] = it; });
-  return obj;
 }
 function euro(bedrag){
   return "€ " + Number(bedrag).toFixed(2).replace(".", ",");
@@ -80,7 +73,7 @@ function restaurantMaken(naam){
   db.ref("restaurants/" + code).set({
     naam: naam,
     aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-    menu: standaardMenu(),
+    menu: {},
   }).then(() => {
     opslaanRestaurant(code, naam);
     startRestaurant();
@@ -101,6 +94,7 @@ function restaurantJoinen(codeInvoer){
 }
 function startRestaurant(){
   state.foutmelding = "";
+  state.actiefInRestaurant = true;
   const code = state.restaurantCode;
   db.ref("restaurants/" + code + "/menu").on("value", snap => {
     state.menu = snap.val() || {};
@@ -108,6 +102,10 @@ function startRestaurant(){
   });
   db.ref("restaurants/" + code + "/bestellingen").on("value", snap => {
     state.bestellingen = snap.val() || {};
+    render();
+  });
+  db.ref("restaurants/" + code + "/updates").on("value", snap => {
+    state.updates = snap.val() || {};
     render();
   });
   render();
@@ -136,16 +134,25 @@ function statusBijwerken(orderId, status){
 function bestellingArchiveren(orderId){
   db.ref("restaurants/" + state.restaurantCode + "/bestellingen/" + orderId).remove();
 }
-function menuItemToevoegen(naam, prijs, categorie){
+function menuItemToevoegen(naam, prijs, categorie, emoji){
   if(!naam.trim() || !prijs) return;
   db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
     naam: naam.trim(),
     prijs: parseFloat(prijs.replace(",", ".")) || 0,
     categorie: categorie.trim() || "Overig",
+    emoji: emoji || "🍽️",
   });
 }
 function menuItemVerwijderen(id){
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).remove();
+}
+function updateToevoegen(tekst){
+  tekst = tekst.trim();
+  if(!tekst) return;
+  db.ref("restaurants/" + state.restaurantCode + "/updates").push().set({
+    tekst: tekst,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  });
 }
 
 // ---------- winkelwagen ----------
@@ -153,7 +160,7 @@ function toevoegenAanWagen(id, item){
   if(state.winkelwagen[id]){
     state.winkelwagen[id].aantal += 1;
   } else {
-    state.winkelwagen[id] = { naam:item.naam, prijs:item.prijs, aantal:1, notitie:"" };
+    state.winkelwagen[id] = { naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", aantal:1, notitie:"" };
   }
   render();
 }
@@ -175,7 +182,7 @@ function wagenNotitieWijzigen(id, tekst){
 // RENDER
 // ============================================================
 function render(){
-  if(!state.restaurantCode){
+  if(!state.actiefInRestaurant){
     renderLanding();
   } else {
     renderDashboard();
@@ -195,6 +202,12 @@ function renderLanding(){
       <div class="landing">
         ${merk}
         <p class="landing__sub">Waar wilt u naartoe?</p>
+        ${state.restaurantCode ? `
+          <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" style="width:320px;">
+            <div class="choice-card__title">Verder naar ${state.restaurantNaam}</div>
+            <p class="choice-card__desc">Je hebt hier al een restaurant (code ${state.restaurantCode}) — ga er direct naartoe.</p>
+          </button>
+        ` : ""}
         <div class="landing__choices">
           <button class="choice-card" data-action="ga-maken">
             <div class="choice-card__title">Restaurant maken</div>
@@ -282,6 +295,7 @@ function renderBestellen(){
         productenHtml += `
           <button class="product-card" data-action="toevoegen-wagen" data-id="${id}">
             <span class="product-card__plus">+</span>
+            <div class="product-card__emoji">${i.emoji||"🍽️"}</div>
             <div class="product-card__naam">${i.naam}</div>
             <div class="product-card__prijs">${euro(i.prijs)}</div>
           </button>`;
@@ -297,7 +311,7 @@ function renderBestellen(){
     wagenHtml = wagenItems.map(([id,i]) => `
       <div class="wagen__regel">
         <div class="wagen__regel-top">
-          <div class="wagen__regel-naam">${i.naam}</div>
+          <div class="wagen__regel-naam">${i.emoji?i.emoji+" ":""}${i.naam}</div>
           <div class="wagen__aantal">
             <button data-action="wagen-min" data-id="${id}">−</button>
             <span>${i.aantal}</span>
@@ -327,7 +341,7 @@ function renderBestellen(){
 
 function ticketHtml(id, b, kolom){
   const items = (b.items||[]).map(it => `
-    <li class="ticket__item"><b>${it.aantal}×</b> ${it.naam}
+    <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
       ${it.notitie ? `<span class="ticket__item-notitie">— ${it.notitie}</span>` : ""}
     </li>`).join("");
   const tijd = b.aangemaakt ? new Date(b.aangemaakt).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}) : "";
@@ -397,12 +411,23 @@ function renderInstellingen(){
   const menuArr = Object.entries(state.menu || {});
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li>
-      <span>${i.naam} <span class="cat">${i.categorie}</span></span>
+      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
       <span style="display:flex; align-items:center; gap:10px;">
         <span>${euro(i.prijs)}</span>
         <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
       </span>
     </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
+
+  const emojiGrid = state.emojiPickerOpen ? `
+    <div class="emoji-grid">
+      ${EMOJIS.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
+    </div>` : "";
+
+  const updatesArr = Object.entries(state.updates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
+  const updatesHtml = updatesArr.length ? updatesArr.map(([,u]) => {
+    const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    return `<li><span class="update-lijst__datum">${datum}</span><span>${u.tekst}</span></li>`;
+  }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
 
   return `
     <h2 class="view-titel">Instellingen</h2>
@@ -419,12 +444,25 @@ function renderInstellingen(){
     <div class="instel-blok">
       <div class="instel-blok__titel">Menu beheren</div>
       <div class="menu-form">
+        <div class="emoji-kiezer">
+          <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
+          ${emojiGrid}
+        </div>
         <input id="menu-naam" placeholder="Productnaam">
         <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)">
         <input id="menu-categorie" placeholder="Categorie">
         <button class="btn btn--flame" data-action="menu-toevoegen">Toevoegen</button>
       </div>
       <ul class="menu-lijst">${menuHtml}</ul>
+    </div>
+
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Updatelog</div>
+      <div class="menu-form" style="grid-template-columns:1fr auto;">
+        <input id="update-tekst" placeholder="Wat is er veranderd?">
+        <button class="btn btn--flame" data-action="update-toevoegen">Plaatsen</button>
+      </div>
+      <ul class="update-lijst">${updatesHtml}</ul>
     </div>
 
     <div class="instel-blok">
@@ -448,6 +486,7 @@ root.addEventListener("click", e => {
     case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
     case "maak-restaurant": restaurantMaken(document.getElementById("input-naam").value); break;
     case "join-restaurant": restaurantJoinen(document.getElementById("input-code").value); break;
+    case "doorgaan-restaurant": startRestaurant(); break;
 
     case "wissel-view": state.huidigeView = el.dataset.view; render(); break;
     case "kopieer-code":
@@ -466,17 +505,25 @@ root.addEventListener("click", e => {
     case "bereiden-klaar": statusBijwerken(id, "klaar"); break;
     case "markeer-bezorgd": bestellingArchiveren(id); toonToast("Bestelling bezorgd"); break;
 
+    case "emoji-toggle": state.emojiPickerOpen = !state.emojiPickerOpen; render(); break;
+    case "emoji-kies": state.nieuwProductEmoji = el.dataset.emoji; state.emojiPickerOpen = false; render(); break;
+
     case "menu-toevoegen":
       menuItemToevoegen(
         document.getElementById("menu-naam").value,
         document.getElementById("menu-prijs").value,
-        document.getElementById("menu-categorie").value
+        document.getElementById("menu-categorie").value,
+        state.nieuwProductEmoji
       );
-      document.getElementById("menu-naam").value="";
-      document.getElementById("menu-prijs").value="";
-      document.getElementById("menu-categorie").value="";
+      state.nieuwProductEmoji = "🍽️";
+      render();
       break;
     case "menu-verwijder": menuItemVerwijderen(id); break;
+
+    case "update-toevoegen":
+      updateToevoegen(document.getElementById("update-tekst").value);
+      render();
+      break;
   }
 });
 
@@ -492,8 +539,4 @@ root.addEventListener("input", e => {
 // ============================================================
 // START
 // ============================================================
-if(state.restaurantCode){
-  startRestaurant();
-} else {
-  render();
-}
+render();
