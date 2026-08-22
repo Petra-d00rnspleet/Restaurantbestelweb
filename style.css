@@ -644,23 +644,36 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   background:var(--panel-2);
   border:1px solid var(--line);
   border-radius:var(--radius);
-  padding:8px;
-  display:grid;
-  grid-template-columns:repeat(6,1fr);
-  gap:4px;
-  width:216px;
+  padding:10px;
+  width:250px;
+  max-height:280px;
+  overflow-y:auto;
   box-shadow:0 12px 26px rgba(0,0,0,.45);
 }
-.emoji-grid button{
+.emoji-grid__categorie{
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-size:.65rem;
+  color:var(--flame);
+  margin:10px 0 5px;
+}
+.emoji-grid__categorie:first-child{ margin-top:0; }
+.emoji-grid__rij{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:3px;
+}
+.emoji-grid__rij button{
   background:transparent;
   border:1px solid transparent;
   border-radius:4px;
-  font-size:1.2rem;
+  font-size:1.15rem;
   line-height:1;
   padding:5px 0;
 }
-.emoji-grid button:hover{ background:var(--bg-2); }
-.emoji-grid button.actief{ border-color:var(--flame); background:var(--bg-2); }
+.emoji-grid__rij button:hover{ background:var(--bg-2); }
+.emoji-grid__rij button.actief{ border-color:var(--flame); background:var(--bg-2); }
 
 .update-lijst{ list-style:none; margin:0; padding:0; }
 .update-lijst li{
@@ -668,15 +681,61 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   border-bottom:1px solid var(--line);
   font-size:.88rem;
   display:flex;
-  flex-direction:column;
-  gap:3px;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
 }
+.update-lijst li > div{ display:flex; flex-direction:column; gap:3px; }
 .update-lijst li:last-child{ border-bottom:none; }
 .update-lijst__datum{
   font-family:var(--mono);
   font-size:.7rem;
   color:var(--flame);
   letter-spacing:.03em;
+  margin-right:8px;
+}
+
+.historie-tabel{
+  width:100%;
+  border-collapse:collapse;
+  font-size:.88rem;
+}
+.historie-tabel th{
+  text-align:left;
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-size:.68rem;
+  color:var(--flame);
+  padding:8px 10px;
+  border-bottom:1px solid var(--line);
+}
+.historie-tabel td{
+  padding:9px 10px;
+  border-bottom:1px solid var(--line);
+}
+.historie-tabel tr:last-child td{ border-bottom:none; }
+
+.nieuws-teaser{
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--panel);
+  padding:14px 18px;
+  width:min(420px, 90vw);
+  text-align:left;
+}
+.nieuws-teaser__titel{
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  font-size:.68rem;
+  color:var(--flame);
+  margin-bottom:8px;
+}
+.nieuws-teaser__regel{
+  font-size:.85rem;
+  color:var(--text-dim);
+  padding:4px 0;
 }
 
 .product-card__emoji{ font-size:1.6rem; margin-bottom:6px; line-height:1; }
