@@ -21,10 +21,7 @@ const state = {
   foutmelding: "",
 };
 
-const FLAME_SVG = `<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" class="landing__flame">
-  <path d="M32 4C24 16 14 22 14 36c0 12 9.5 22 18 22s18-10 18-22c0-6-2-11-5-15 0 6-4 10-8 10 3-8 0-17-5-27z" fill="#ff5a1f"/>
-  <path d="M32 24c-3 6-7 9-7 15 0 6 4.5 11 9 11s9-5 9-11c0-3-1-5.5-2.5-7.5 0 3-2 5-4 5 1.5-4 0-8.5-4.5-12.5z" fill="#ffb27a"/>
-</svg>`;
+const MERKNAAM = "Ticket";
 
 // ---------- helpers ----------
 function opslaanRestaurant(code, naam){
@@ -186,19 +183,24 @@ function render(){
 }
 
 function renderLanding(){
+  const merk = `
+    <div class="landing__mark">
+      <div class="landing__eyebrow">Welkom bij</div>
+      <h1 class="landing__title">${MERKNAAM}</h1>
+      <div class="landing__divider"><span class="landing__diamond"></span></div>
+    </div>`;
+
   if(state.landingScherm === "start"){
     root.innerHTML = `
       <div class="landing">
-        <div class="landing__mark">${FLAME_SVG}<h1 class="landing__title">TICKET<span>.</span></h1></div>
-        <p class="landing__sub">Live bestelsysteem voor je restaurant — bestellen, keuken en bezorgen, realtime gesynchroniseerd op elk apparaat.</p>
+        ${merk}
+        <p class="landing__sub">Waar wilt u naartoe?</p>
         <div class="landing__choices">
           <button class="choice-card" data-action="ga-maken">
-            <div class="choice-card__num">01</div>
             <div class="choice-card__title">Restaurant maken</div>
             <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
           </button>
           <button class="choice-card" data-action="ga-joinen">
-            <div class="choice-card__num">02</div>
             <div class="choice-card__title">Restaurant joinen</div>
             <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant.</p>
           </button>
@@ -207,7 +209,7 @@ function renderLanding(){
   } else if(state.landingScherm === "maken"){
     root.innerHTML = `
       <div class="landing">
-        <div class="landing__mark">${FLAME_SVG}<h1 class="landing__title">TICKET<span>.</span></h1></div>
+        ${merk}
         <div class="form-card">
           <label class="form-card__label">Naam van je restaurant</label>
           <input id="input-naam" type="text" placeholder="Bijv. De Gouden Pan" autofocus>
@@ -222,7 +224,7 @@ function renderLanding(){
   } else if(state.landingScherm === "joinen"){
     root.innerHTML = `
       <div class="landing">
-        <div class="landing__mark">${FLAME_SVG}<h1 class="landing__title">TICKET<span>.</span></h1></div>
+        ${merk}
         <div class="form-card">
           <label class="form-card__label">Restaurantcode</label>
           <input id="input-code" type="text" placeholder="Bijv. K3F7Q" autofocus style="text-transform:uppercase; letter-spacing:.1em;">
@@ -246,9 +248,6 @@ function renderDashboard(){
     <div class="shell">
       <header class="topbar">
         <div class="topbar__id">
-          <svg viewBox="0 0 64 64" fill="none" class="topbar__flame">
-            <path d="M32 4C24 16 14 22 14 36c0 12 9.5 22 18 22s18-10 18-22c0-6-2-11-5-15 0 6-4 10-8 10 3-8 0-17-5-27z" fill="#ff5a1f"/>
-          </svg>
           <div class="topbar__naam">${state.restaurantNaam}</div>
           <button class="topbar__code" data-action="kopieer-code" title="Klik om code te kopiëren">${state.restaurantCode}</button>
         </div>
