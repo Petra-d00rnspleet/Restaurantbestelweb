@@ -158,6 +158,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 .choice-card:hover{ transform:translateY(-3px); border-color:var(--flame-dark); background:var(--panel-2); }
 .choice-card:hover::after{ transform:scaleX(1); }
+.choice-card--actief{
+  border-color:var(--flame-dark);
+  background:var(--panel-2);
+}
+.choice-card--actief::after{ transform:scaleX(1); }
 .choice-card__num{
   display:none;
 }
@@ -605,9 +610,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 
 .menu-form{
   display:grid;
-  grid-template-columns:2fr 1fr 1fr auto;
+  grid-template-columns:auto 2fr 1fr 1fr auto;
   gap:10px;
   margin-bottom:18px;
+  align-items:start;
 }
 @media (max-width:700px){
   .menu-form{ grid-template-columns:1fr 1fr; }
@@ -620,6 +626,60 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   padding:9px 11px;
   font-size:.88rem;
 }
+
+.emoji-kiezer{ position:relative; }
+.emoji-kiezer__knop{
+  width:42px; height:42px;
+  font-size:1.3rem;
+  line-height:1;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+}
+.emoji-kiezer__knop:hover{ border-color:var(--flame); }
+.emoji-grid{
+  position:absolute;
+  top:48px; left:0; z-index:20;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:8px;
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:4px;
+  width:216px;
+  box-shadow:0 12px 26px rgba(0,0,0,.45);
+}
+.emoji-grid button{
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:4px;
+  font-size:1.2rem;
+  line-height:1;
+  padding:5px 0;
+}
+.emoji-grid button:hover{ background:var(--bg-2); }
+.emoji-grid button.actief{ border-color:var(--flame); background:var(--bg-2); }
+
+.update-lijst{ list-style:none; margin:0; padding:0; }
+.update-lijst li{
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:.88rem;
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+}
+.update-lijst li:last-child{ border-bottom:none; }
+.update-lijst__datum{
+  font-family:var(--mono);
+  font-size:.7rem;
+  color:var(--flame);
+  letter-spacing:.03em;
+}
+
+.product-card__emoji{ font-size:1.6rem; margin-bottom:6px; line-height:1; }
 
 .menu-lijst{ list-style:none; margin:0; padding:0; }
 .menu-lijst li{
