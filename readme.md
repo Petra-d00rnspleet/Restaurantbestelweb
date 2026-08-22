@@ -3,10 +3,21 @@
 Een klein bestelsysteem voor een restaurant: **Bestellen → Keuken → Bezorgen**,
 live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
-- **Bestellen**: klik producten aan, voeg per product een notitie toe, verstuur de bestelling.
+- **Bestellen**: klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
-- **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden.
-- **Instellingen**: bekijk/deel de restaurantcode en beheer het menu.
+- **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
+- **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
+- **Instellingen**: bekijk/deel de restaurantcode, beheer het menu, en bekijk systeemupdates.
+
+### Beheerderswachtwoord voor systeemupdates
+
+Onder Instellingen staat een **Systeemupdates**-blok dat voor iedereen die de site gebruikt zichtbaar is, maar alleen jij (als bouwer van de site) kunt er iets in plaatsen. Dit werkt met een simpel wachtwoord, ingesteld bovenin `app.js`:
+
+```js
+const BEHEERDER_WACHTWOORD = "verander-dit-wachtwoord";
+```
+
+Pas deze waarde aan naar iets alleen bij jou bekends vóórdat je de site publiceert. Let op: dit is een lichte, client-side beveiliging — prima voor een schoolproject of eigen gebruik, maar iemand die in de broncode kijkt kan het wachtwoord vinden. Voor echte beveiliging is Firebase Authentication + strengere databaseregels nodig.
 
 Geen server nodig — dit is een pure HTML/CSS/JS site die op **GitHub Pages** kan draaien. Firebase Realtime Database regelt de live synchronisatie.
 
