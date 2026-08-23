@@ -58,6 +58,9 @@ const EMOJI_CATEGORIEEN = {
   "Dranken": ["🥤","☕","🍺","🍷","🍹","🧃","🍵","🥃","🧉","🥛"],
 };
 
+// Smaken die een gast kan kiezen bij een product met "IJskeuze" aan.
+const IJS_SMAKEN = ["Vanille","Chocolade","Aardbei","Stracciatella","Pistache","Karamel","Mokka","Citroen"];
+
 // ---------- helpers ----------
 function opslaanRestaurant(code, naam){
   state.restaurantCode = code;
@@ -276,17 +279,23 @@ function historieWissen(){
   if(!confirm("Weet je zeker dat je de hele geschiedenis van dit restaurant wilt wissen? Dit kan niet ongedaan gemaakt worden.")) return;
   db.ref("restaurants/" + state.restaurantCode + "/historie").remove();
 }
-function menuItemToevoegen(naam, prijs, categorie, emoji){
+function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze){
   if(!naam.trim() || !prijs) return;
   db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
     naam: naam.trim(),
     prijs: parseFloat(prijs.replace(",", ".")) || 0,
     categorie: categorie.trim() || "Overig",
     emoji: emoji || "🍽️",
+    ijsKeuze: !!ijsKeuze,
+    slagroomKeuze: !!slagroomKeuze,
+    uitverkocht: false,
   });
 }
 function menuItemVerwijderen(id){
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).remove();
+}
+function menuItemUitverkochtWijzigen(id, waarde){
+  db.ref("restaurants/" + state.restaurantCode + "/menu/" + id + "/uitverkocht").set(!!waarde);
 }
 
 // ---------- team & rechten (alleen te beheren door de eigenaar van het restaurant) ----------
@@ -354,10 +363,18 @@ function siteUpdateVerwijderen(id){
 
 // ---------- winkelwagen ----------
 function toevoegenAanWagen(id, item){
+  if(!item || item.uitverkocht) return;
   if(state.winkelwagen[id]){
     state.winkelwagen[id].aantal += 1;
   } else {
-    state.winkelwagen[id] = { naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", categorie:item.categorie||"Overig", aantal:1, notitie:"" };
+    state.winkelwagen[id] = {
+      naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", categorie:item.categorie||"Overig",
+      aantal:1, notitie:"",
+      ijsKeuze: !!item.ijsKeuze,
+      slagroomKeuze: !!item.slagroomKeuze,
+      ijssmaak: item.ijsKeuze ? IJS_SMAKEN[0] : "",
+      slagroom: false,
+    };
   }
   render();
 }
@@ -373,6 +390,20 @@ function wagenVerwijderen(id){
 }
 function wagenNotitieWijzigen(id, tekst){
   if(state.winkelwagen[id]) state.winkelwagen[id].notitie = tekst;
+}
+function wagenIjssmaakWijzigen(id, smaak){
+  if(state.winkelwagen[id]) state.winkelwagen[id].ijssmaak = smaak;
+}
+function wagenSlagroomWijzigen(id, waarde){
+  if(state.winkelwagen[id]) state.winkelwagen[id].slagroom = !!waarde;
+}
+// Bouwt de extra-informatieregel onder een besteld item (notitie, ijssmaak, slagroom).
+function itemExtraHtml(it){
+  const delen = [];
+  if(it.ijssmaak) delen.push("🍦 " + it.ijssmaak);
+  if(it.slagroom) delen.push("🥛 Met slagroom");
+  if(it.notitie) delen.push(it.notitie);
+  return delen.length ? `<span class="ticket__item-notitie">— ${delen.join(" · ")}</span>` : "";
 }
 
 // ============================================================
@@ -521,11 +552,15 @@ function renderBestellen(){
     categorieen.forEach(cat => {
       productenHtml += `<div class="categorie-titel">${cat}</div><div class="product-grid">`;
       menuArr.filter(([,i]) => (i.categorie||"Overig") === cat).forEach(([id,i]) => {
+        const uitverkocht = !!i.uitverkocht;
+        const opties = [];
+        if(i.ijsKeuze) opties.push("🍦");
+        if(i.slagroomKeuze) opties.push("🥛");
         productenHtml += `
-          <button class="product-card" data-action="toevoegen-wagen" data-id="${id}">
-            <span class="product-card__plus">+</span>
+          <button class="product-card ${uitverkocht?'product-card--uitverkocht':''}" ${uitverkocht?'disabled':'data-action="toevoegen-wagen"'} data-id="${id}">
+            ${uitverkocht ? `<span class="product-card__uitverkocht-badge">Uitverkocht</span>` : `<span class="product-card__plus">+</span>`}
             <div class="product-card__emoji">${i.emoji||"🍽️"}</div>
-            <div class="product-card__naam">${i.naam}</div>
+            <div class="product-card__naam">${i.naam}${opties.length?` <span class="product-card__opties">${opties.join(" ")}</span>`:""}</div>
             <div class="product-card__prijs">${euro(i.prijs)}</div>
           </button>`;
       });
@@ -547,6 +582,15 @@ function renderBestellen(){
             <button data-action="wagen-plus" data-id="${id}">+</button>
           </div>
         </div>
+        ${i.ijsKeuze ? `
+          <select class="wagen__select" data-action="wagen-ijssmaak" data-id="${id}">
+            ${IJS_SMAKEN.map(s => `<option value="${s}" ${i.ijssmaak===s?"selected":""}>🍦 ${s}</option>`).join("")}
+          </select>` : ""}
+        ${i.slagroomKeuze ? `
+          <label class="wagen__checkbox">
+            <input type="checkbox" data-action="wagen-slagroom" data-id="${id}" ${i.slagroom?"checked":""}>
+            🥛 Met slagroom
+          </label>` : ""}
         <input class="wagen__notitie" placeholder="Notitie, bijv. 'geen ui'" value="${i.notitie||""}" data-action="wagen-notitie" data-id="${id}">
         <button class="wagen__verwijder" data-action="wagen-verwijder" data-id="${id}">verwijderen</button>
       </div>`).join("");
@@ -571,7 +615,7 @@ function renderBestellen(){
 function ticketHtml(id, b, kolom){
   const items = (b.items||[]).map(it => `
     <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
-      ${it.notitie ? `<span class="ticket__item-notitie">— ${it.notitie}</span>` : ""}
+      ${itemExtraHtml(it)}
     </li>`).join("");
   const tijd = b.aangemaakt ? new Date(b.aangemaakt).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}) : "";
 
@@ -661,7 +705,7 @@ function renderHistorie(){
     const tijd = b.bezorgd ? new Date(b.bezorgd).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
     const items = (b.items||[]).map(it => `
       <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
-        ${it.notitie ? `<span class="ticket__item-notitie">— ${it.notitie}</span>` : ""}
+        ${itemExtraHtml(it)}
       </li>`).join("");
     return `
       <div class="ticket">
@@ -709,6 +753,7 @@ const THEMA_PRESETS = [
 function renderInstellingen(){
   const subtabs = [{ key:"algemeen", label:"Algemeen" }];
   if(heeftRecht('instellingen')) subtabs.push({ key:"producten", label:"Producten" });
+  if(heeftRecht('instellingen')) subtabs.push({ key:"voorraad", label:"Voorraad" });
   if(heeftRecht('instellingen')) subtabs.push({ key:"achtergrond", label:"Achtergrond" });
   if(heeftRecht('instellingen')) subtabs.push({ key:"plattegrond", label:"Plattegrond" });
 
@@ -721,6 +766,7 @@ function renderInstellingen(){
   let inhoudHtml = "";
   if(state.instellingenTab === "algemeen") inhoudHtml = renderInstellingenAlgemeen();
   else if(state.instellingenTab === "producten") inhoudHtml = renderInstellingenProducten();
+  else if(state.instellingenTab === "voorraad") inhoudHtml = renderInstellingenVoorraad();
   else if(state.instellingenTab === "achtergrond") inhoudHtml = renderInstellingenAchtergrond();
   else if(state.instellingenTab === "plattegrond") inhoudHtml = renderPlattegrond();
 
@@ -821,7 +867,7 @@ function renderInstellingenProducten(){
   const menuArr = Object.entries(state.menu || {});
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li>
-      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
+      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🍦 ijskeuze</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
       <span style="display:flex; align-items:center; gap:10px;">
         <span>${euro(i.prijs)}</span>
         <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
@@ -851,7 +897,36 @@ function renderInstellingenProducten(){
         <input id="menu-categorie" placeholder="Categorie">
         <button class="btn btn--flame" data-action="menu-toevoegen">Toevoegen</button>
       </div>
+      <div class="menu-form__opties">
+        <label class="menu-form__optie">
+          <input type="checkbox" id="menu-ijskeuze">
+          🍦 IJskeuze aanbieden
+        </label>
+        <label class="menu-form__optie">
+          <input type="checkbox" id="menu-slagroom">
+          🥛 Slagroomkeuze aanbieden
+        </label>
+      </div>
       <ul class="menu-lijst">${menuHtml}</ul>
+    </div>`;
+}
+
+function renderInstellingenVoorraad(){
+  const menuArr = Object.entries(state.menu || {});
+  const lijstHtml = menuArr.length ? menuArr.map(([id,i]) => `
+    <li class="voorraad-rij ${i.uitverkocht?'voorraad-rij--uitverkocht':''}">
+      <span class="voorraad-rij__naam">${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
+      <label class="voorraad-toggle">
+        <input type="checkbox" data-action="voorraad-toggle" data-id="${id}" ${i.uitverkocht?"checked":""}>
+        <span>Uitverkocht</span>
+      </label>
+    </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
+
+  return `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Voorraad</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Zet een product op uitverkocht om het tijdelijk te verbergen bij Bestellen, zonder het te verwijderen.</p>
+      <ul class="voorraad-lijst">${lijstHtml}</ul>
     </div>`;
 }
 
@@ -991,7 +1066,9 @@ root.addEventListener("click", e => {
         document.getElementById("menu-naam").value,
         document.getElementById("menu-prijs").value,
         document.getElementById("menu-categorie").value,
-        state.nieuwProductEmoji
+        state.nieuwProductEmoji,
+        document.getElementById("menu-ijskeuze").checked,
+        document.getElementById("menu-slagroom").checked
       );
       state.nieuwProductEmoji = "🍽️";
       render();
@@ -1018,6 +1095,9 @@ root.addEventListener("change", e => {
   if(action === "functie-wijzigen") ledFunctieWijzigen(id, el.value);
   if(action === "thema-achtergrond") themaWijzigen("achtergrond", el.value);
   if(action === "thema-tekst") themaWijzigen("tekst", el.value);
+  if(action === "voorraad-toggle") menuItemUitverkochtWijzigen(id, el.checked);
+  if(action === "wagen-ijssmaak") wagenIjssmaakWijzigen(id, el.value);
+  if(action === "wagen-slagroom") wagenSlagroomWijzigen(id, el.checked);
 });
 
 // ============================================================
