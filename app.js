@@ -24,8 +24,10 @@ const state = {
   leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
   ledenGeladen: false,
   thema: null,                 // { achtergrond, tekst } — eigen kleuren voor dit restaurant
-  plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
+  plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"|"bank"|"bank-deel", ...} }
   plattegrondTool: "tafel",
+  plattegrondBankOriëntatie: "horizontaal", // horizontaal | verticaal — voor het plaatsen van een nieuwe bank
+  plattegrondBankLengte: 2,                 // aantal cellen dat een nieuwe bank lang is
   siteUpdates: {},
   beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
   winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
@@ -38,6 +40,13 @@ const state = {
 };
 
 const MERKNAAM = "Restaurants";
+
+// Afmetingen van het plattegrond-rooster, gedeeld tussen de bewerk-modus en de weergave bij Bestellen.
+const PLATTEGROND_RIJEN = 7, PLATTEGROND_KOLOMMEN = 12;
+
+// Rotatie-standen van een stoel, in klikvolgorde (90° met de klok mee per klik).
+const STOEL_RICHTINGEN = ["boven", "rechts", "onder", "links"];
+const STOEL_ROTATIE = { boven: 0, rechts: 90, onder: 180, links: 270 };
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
 const BEHEERDER_WACHTWOORD = "Sanipi123";
@@ -379,27 +388,134 @@ function ledVerwijderen(ledId){
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
 }
 
-// ---------- plattegrond (tafels & stoelen) ----------
+// ---------- plattegrond (tafels, stoelen & banken) ----------
+
+// Geeft het eerstvolgende vrije tafelnummer.
+function volgendeTafelNummer(){
+  const bestaandeNummers = Object.values(state.plattegrond || {})
+    .filter(c => c.type === "tafel").map(c => c.nummer || 0);
+  return bestaandeNummers.length ? Math.max(...bestaandeNummers) + 1 : 1;
+}
+
+// Volgende rotatiestand van een stoel (cyclisch, 90° per klik).
+function volgendeRichting(richting){
+  const i = STOEL_RICHTINGEN.indexOf(richting || "boven");
+  return STOEL_RICHTINGEN[(i + 1) % STOEL_RICHTINGEN.length];
+}
+
+// Verwijdert alle cellen die bij dezelfde bank horen (in één keer, zodat er geen
+// losse bankdelen achterblijven).
+function bankVerwijderen(bankId){
+  const updates = {};
+  Object.keys(state.plattegrond || {}).forEach(key => {
+    const c = state.plattegrond[key];
+    if(c && c.bankId === bankId) updates[key] = null;
+  });
+  if(Object.keys(updates).length){
+    db.ref("restaurants/" + state.restaurantCode + "/plattegrond").update(updates);
+  }
+}
+
+// Plaatst een nieuwe bank vanaf `cel`, met de op dit moment gekozen oriëntatie en grootte.
+// Weigert (met een toast) als de bank niet past of een deel ervan al bezet is.
+function bankPlaatsen(cel){
+  const delen = cel.split("-");
+  const r = parseInt(delen[0], 10), c = parseInt(delen[1], 10);
+  const horizontaal = state.plattegrondBankOriëntatie !== "verticaal";
+  const lengte = state.plattegrondBankLengte || 2;
+  const cellen = [];
+  for(let i = 0; i < lengte; i++){
+    const rr = horizontaal ? r : r + i;
+    const cc = horizontaal ? c + i : c;
+    if(rr < 0 || rr >= PLATTEGROND_RIJEN || cc < 0 || cc >= PLATTEGROND_KOLOMMEN){
+      toonToast("Past niet op de plattegrond vanaf hier");
+      return;
+    }
+    const key = rr + "-" + cc;
+    if((state.plattegrond || {})[key]){
+      toonToast("Daar staat al iets in de weg");
+      return;
+    }
+    cellen.push(key);
+  }
+  const bankId = "bank" + Date.now() + Math.round(Math.random() * 9999);
+  const updates = {};
+  cellen.forEach((key, i) => {
+    updates[key] = {
+      type: i === 0 ? "bank" : "bank-deel",
+      bankId,
+      oriëntatie: horizontaal ? "horizontaal" : "verticaal",
+      lengte,
+      volgorde: i,
+    };
+  });
+  db.ref("restaurants/" + state.restaurantCode + "/plattegrond").update(updates);
+}
+
 function plattegrondCelKlikken(cel){
   if(!heeftRecht('instellingen')) return;
   const tool = state.plattegrondTool;
   const huidige = (state.plattegrond || {})[cel];
   const ref = db.ref("restaurants/" + state.restaurantCode + "/plattegrond/" + cel);
+  const isBankCel = huidige && (huidige.type === "bank" || huidige.type === "bank-deel");
+
   if(tool === "wissen"){
-    if(huidige) ref.remove();
+    if(!huidige) return;
+    if(isBankCel) bankVerwijderen(huidige.bankId);
+    else ref.remove();
     return;
   }
-  if(huidige && huidige.type === tool){
-    ref.remove();
-  } else if(tool === "tafel"){
-    // Nieuwe tafel: geef 'm automatisch het eerstvolgende tafelnummer.
-    const bestaandeNummers = Object.values(state.plattegrond || {})
-      .filter(c => c.type === "tafel").map(c => c.nummer || 0);
-    const volgendeNummer = bestaandeNummers.length ? Math.max(...bestaandeNummers) + 1 : 1;
-    ref.set({ type: "tafel", nummer: volgendeNummer, bezet: false });
-  } else {
-    ref.set({ type: tool });
+
+  if(tool === "bank"){
+    if(isBankCel) bankVerwijderen(huidige.bankId);           // nogmaals klikken haalt de bank weer weg
+    else if(huidige) toonToast("Daar staat al iets — verwijder het eerst");
+    else bankPlaatsen(cel);
+    return;
   }
+
+  // Vanaf hier: tafel of stoel plaatsen. Stond hier een bank, ruim die eerst helemaal op.
+  if(isBankCel) bankVerwijderen(huidige.bankId);
+
+  if(tool === "stoel"){
+    if(!isBankCel && huidige && huidige.type === "stoel"){
+      ref.set({ type: "stoel", richting: volgendeRichting(huidige.richting) }); // nogmaals klikken draait 'm 90°
+    } else {
+      ref.set({ type: "stoel", richting: "boven" });
+    }
+    return;
+  }
+
+  if(tool === "tafel"){
+    if(!isBankCel && huidige && huidige.type === "tafel"){
+      ref.remove();
+    } else {
+      ref.set({ type: "tafel", nummer: volgendeTafelNummer(), bezet: false });
+    }
+  }
+}
+
+// Geeft de weergave (classes, rotatie-stijl, inhoud) voor een stoel- of bankcel, gedeeld
+// tussen de bewerk-modus (Instellingen) en de weergave bij Bestellen. Tafels hebben hun
+// eigen opmaak (met tafelnummer/bezet-status) en worden apart afgehandeld door de aanroeper.
+function plattegrondCelWeergave(obj){
+  if(!obj) return { classes: "plattegrond__cel--leeg", stijl: "", inhoud: "" };
+  if(obj.type === "stoel"){
+    const graden = STOEL_ROTATIE[obj.richting] || 0;
+    return { classes: "plattegrond__cel--stoel", stijl: `transform:rotate(${graden}deg);`, inhoud: "🪑" };
+  }
+  if(obj.type === "bank" || obj.type === "bank-deel"){
+    const horizontaal = obj.oriëntatie !== "verticaal";
+    const volgorde = obj.volgorde || 0;
+    const eerste = volgorde === 0;
+    const laatste = volgorde === (obj.lengte || 1) - 1;
+    let posKlasse = "plattegrond__cel--bank-midden";
+    if(eerste && laatste) posKlasse = "plattegrond__cel--bank-solo";
+    else if(eerste) posKlasse = "plattegrond__cel--bank-start";
+    else if(laatste) posKlasse = "plattegrond__cel--bank-eind";
+    const richtingKlasse = horizontaal ? "plattegrond__cel--bank-h" : "plattegrond__cel--bank-v";
+    return { classes: `plattegrond__cel--bank ${richtingKlasse} ${posKlasse}`, stijl: "", inhoud: eerste ? "🛋️" : "" };
+  }
+  return { classes: "", stijl: "", inhoud: "" };
 }
 
 // ---------- systeemupdates (site-breed, alleen beheerder mag schrijven) ----------
@@ -628,23 +744,23 @@ function renderBestellen(){
 
 // Toont de plattegrond als eerste stap van Bestellen: klik op een tafel om ervoor te bestellen.
 function renderBestellenPlattegrond(){
-  const RIJEN = 7, KOLOMMEN = 12;
   let cellenHtml = "";
-  for(let r=0;r<RIJEN;r++){
-    for(let c=0;c<KOLOMMEN;c++){
+  for(let r=0;r<PLATTEGROND_RIJEN;r++){
+    for(let c=0;c<PLATTEGROND_KOLOMMEN;c++){
       const key = r + "-" + c;
       const obj = (state.plattegrond || {})[key];
       if(!obj){
         cellenHtml += `<div class="plattegrond__cel plattegrond__cel--leeg"></div>`;
-      } else if(obj.type === "stoel"){
-        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel">🪑</div>`;
-      } else {
+      } else if(obj.type === "tafel"){
         const bezet = !!obj.bezet;
         cellenHtml += `
           <button type="button" class="plattegrond__cel plattegrond__cel--tafel ${bezet?'plattegrond__cel--bezet':'plattegrond__cel--vrij'}"
             data-action="bestel-tafel-kiezen" data-cel="${key}" title="Tafel ${obj.nummer||''} — ${bezet?'bezet':'vrij'}">
             🍽️<span class="plattegrond__nr">${obj.nummer||''}</span>
           </button>`;
+      } else {
+        const w = plattegrondCelWeergave(obj);
+        cellenHtml += `<div class="plattegrond__cel ${w.classes}" style="${w.stijl}" title="${obj.type==='stoel'?'Stoel':'Bank'}">${w.inhoud}</div>`;
       }
     }
   }
@@ -657,7 +773,7 @@ function renderBestellenPlattegrond(){
       <span><span class="legenda-stip legenda-stip--bezet"></span>Bezet</span>
     </div>
     <div class="plattegrond-wrap">
-      <div class="plattegrond-grid" style="grid-template-columns:repeat(${KOLOMMEN}, 1fr);">${cellenHtml}</div>
+      <div class="plattegrond-grid" style="grid-template-columns:repeat(${PLATTEGROND_KOLOMMEN}, 1fr);">${cellenHtml}</div>
     </div>
     <button class="btn btn--ghost" style="margin-top:18px;" data-action="bestel-zonder-tafel">Bestelling zonder tafel</button>`;
 }
@@ -1133,16 +1249,33 @@ function renderInstellingenAchtergrond(){
 
 function renderPlattegrond(){
   const magBewerken = heeftRecht('instellingen');
-  const RIJEN = 7, KOLOMMEN = 12;
   let cellenHtml = "";
-  for(let r=0;r<RIJEN;r++){
-    for(let c=0;c<KOLOMMEN;c++){
+  for(let r=0;r<PLATTEGROND_RIJEN;r++){
+    for(let c=0;c<PLATTEGROND_KOLOMMEN;c++){
       const key = r + "-" + c;
       const obj = (state.plattegrond || {})[key];
-      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : "🪑") : "";
-      cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+obj.type):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
+      if(obj && obj.type === "tafel"){
+        cellenHtml += `<button type="button" class="plattegrond__cel plattegrond__cel--tafel" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}</button>`;
+      } else {
+        const w = plattegrondCelWeergave(obj);
+        cellenHtml += `<button type="button" class="plattegrond__cel ${w.classes}" style="${w.stijl}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${w.inhoud}</button>`;
+      }
     }
   }
+
+  const bankOptiesHtml = state.plattegrondTool === "bank" ? `
+    <div class="plattegrond-bank-opties">
+      <div class="plattegrond-bank-opties__groep">
+        <button type="button" class="btn btn--sm ${state.plattegrondBankOriëntatie!=='verticaal'?'btn--flame':'btn--ghost'}" data-action="plattegrond-bank-oriëntatie" data-waarde="horizontaal">↔️ Liggend</button>
+        <button type="button" class="btn btn--sm ${state.plattegrondBankOriëntatie==='verticaal'?'btn--flame':'btn--ghost'}" data-action="plattegrond-bank-oriëntatie" data-waarde="verticaal">↕️ Staand</button>
+      </div>
+      <label class="plattegrond-bank-opties__lengte">
+        Grootte
+        <select data-action="plattegrond-bank-lengte">
+          ${[2,3,4,5,6].map(n => `<option value="${n}" ${state.plattegrondBankLengte===n?"selected":""}>${n} plekken</option>`).join("")}
+        </select>
+      </label>
+    </div>` : "";
 
   return `
     <div class="instel-blok">
@@ -1151,12 +1284,14 @@ function renderPlattegrond(){
         <div class="plattegrond-tools">
           <button type="button" class="btn btn--sm ${state.plattegrondTool==='tafel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="tafel">🍽️ Tafel</button>
           <button type="button" class="btn btn--sm ${state.plattegrondTool==='stoel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="stoel">🪑 Stoel</button>
+          <button type="button" class="btn btn--sm ${state.plattegrondTool==='bank'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="bank">🛋️ Bank</button>
           <button type="button" class="btn btn--sm ${state.plattegrondTool==='wissen'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="wissen">🧹 Wissen</button>
         </div>
-        <p style="color:var(--text-dim); font-size:.8rem; margin:12px 0 16px;">Kies hierboven wat je wilt plaatsen en klik daarna op een vakje. Nogmaals klikken met hetzelfde gereedschap haalt het weer weg. Elke tafel krijgt automatisch een nummer, en verschijnt daarmee klikbaar bij Bestellen.</p>
+        ${bankOptiesHtml}
+        <p style="color:var(--text-dim); font-size:.8rem; margin:12px 0 16px;">Kies hierboven wat je wilt plaatsen en klik daarna op een vakje. Bij Stoel draait nogmaals klikken op dezelfde stoel 'm 90° — gebruik Wissen om 'm te verwijderen. Bij Bank kies je eerst de richting en grootte hierboven; klik daarna op het vakje waar de bank moet beginnen. Elke tafel krijgt automatisch een nummer, en verschijnt daarmee klikbaar bij Bestellen.</p>
       ` : ""}
       <div class="plattegrond-wrap">
-        <div class="plattegrond-grid" style="grid-template-columns:repeat(${KOLOMMEN}, 1fr);">${cellenHtml}</div>
+        <div class="plattegrond-grid" style="grid-template-columns:repeat(${PLATTEGROND_KOLOMMEN}, 1fr);">${cellenHtml}</div>
       </div>
     </div>`;
 }
@@ -1235,6 +1370,7 @@ root.addEventListener("click", e => {
     case "thema-lettertype": themaWijzigen("lettertype", el.dataset.lettertype); break;
     case "plattegrond-tool": state.plattegrondTool = el.dataset.tool; render(); break;
     case "plattegrond-cel": plattegrondCelKlikken(el.dataset.cel); break;
+    case "plattegrond-bank-oriëntatie": state.plattegrondBankOriëntatie = el.dataset.waarde; render(); break;
 
     case "bestel-tafel-kiezen": {
       const cel = el.dataset.cel;
@@ -1292,6 +1428,7 @@ root.addEventListener("change", e => {
   if(action === "thema-achtergrond") themaWijzigen("achtergrond", el.value);
   if(action === "thema-tekst") themaWijzigen("tekst", el.value);
   if(action === "voorraad-toggle") menuItemUitverkochtWijzigen(id, el.checked);
+  if(action === "plattegrond-bank-lengte"){ state.plattegrondBankLengte = parseInt(el.value, 10); render(); }
   if(action === "wagen-ijs") wagenIjsWijzigen(id, el.checked);
   if(action === "wagen-slagroom") wagenSlagroomWijzigen(id, el.checked);
 });
