@@ -8,13 +8,14 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
 - **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
-- **Instellingen**: onderverdeeld in vier tabbladen:
+- **Instellingen**: onderverdeeld in vijf tabbladen:
   - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), systeemupdates, restaurant verlaten.
-  - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie).
+  - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie), en per product aangeven of gasten een **ijskeuze** en/of **slagroomkeuze** krijgen bij het bestellen.
+  - **Voorraad**: elk product op **uitverkocht** zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
   - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen achtergrond- en tekstkleur instellen — geldt voor alle apparaten van dit restaurant.
   - **Plattegrond**: een rooster waarop je tafels en stoelen kunt plaatsen om de indeling van je restaurant weer te geven.
 
-  Producten, Achtergrond en Plattegrond zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht (zie Team & rechten hieronder).
+  Producten, Voorraad, Achtergrond en Plattegrond zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht (zie Team & rechten hieronder).
 
 ### Team & rechten
 
@@ -114,7 +115,7 @@ restaurants/
   K3F7Q/                      ← restaurantcode
     naam: "De Gouden Pan"
     menu/
-      -Nabc.../ { naam, prijs, categorie }
+      -Nabc.../ { naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, uitverkocht }
     leden/
       -Nlid.../ {
         naam: "Sara",
