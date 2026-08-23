@@ -3,15 +3,16 @@
 Een klein bestelsysteem voor een restaurant: **Bestellen → Keuken → Bezorgen**,
 live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
-- **Restaurant maken/joinen**: bij het maken van een restaurant, én bij het joinen met een code, vul je ook je eigen naam in. Zo weet iedereen wie er in het team zit.
+- **Restaurant maken/joinen**: bij het maken van een restaurant, én bij het joinen met een code, vul je ook je eigen naam in. Zo weet iedereen wie er in het team zit. Per apparaat/persoon kun je **maximaal 2 restaurants** hebben (gemaakt + gejoind samen) — zolang je dat maximum nog niet hebt bereikt, zie je op het startscherm de keuzes "Restaurant maken" en "Restaurant joinen"; daarna niet meer. Een restaurant kun je niet zelf uit je lijst verwijderen door het te "verlaten" — dat kan alleen doordat de eigenaar je als teamlid verwijdert, of doordat sitebeheer het hele restaurant verwijdert. Zolang je actief in een restaurant zit, kun je via **"🔀 Wissel restaurant"** (in de bovenbalk of onderaan Instellingen) gewoon teruggaan naar het startscherm om naar je andere restaurant te gaan — dat restaurant blijft daarbij gewoon in je lijst staan.
 - **Bestellen**: als er een plattegrond is ingesteld, zie je eerst de plattegrond — klik op een tafel om er een bestelling voor te plaatsen. Een tafel gaat op **bezet** zodra er een bestelling voor is verstuurd, en wordt pas weer **vrij** als je op "Tafel betaald" klikt. Er is ook altijd de optie "Bestelling zonder tafel" voor een bestelling die niet aan een tafel gekoppeld is. Klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
 - **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
 - **Voorraad**: een eigen tabblad naast Historie, waar je elk product op **uitverkocht** kunt zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
+- **Systeemupdates op het startscherm**: nieuwe updates (geplaatst via Sitebeheer) verschijnen als teaser op het startscherm, met per update een knop **"Gelezen ✕"**. Klik je die aan, dan verdwijnt die update voor jou van het startscherm (dit wordt lokaal per apparaat onthouden) — in Sitebeheer zelf blijft de update gewoon volledig zichtbaar, voor iedereen.
 - **Instellingen**: onderverdeeld in vier tabbladen:
   - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), restaurant verlaten.
-  - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie), en per product aangeven of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
+  - **Producten**: eerst maak je hier **categorieën** aan (bijv. "Dranken", "Fastfood"); die kies je daarna bij het toevoegen van een product uit een keuzelijst, in plaats van steeds opnieuw te typen. Zo krijgt elk product altijd een bestaande, consistente categorie. Bij Bestellen staan de producten van elke categorie automatisch in een rijtje bij elkaar, onder de naam van die categorie. Verder beheer je hier het menu (producten toevoegen/verwijderen met emoji en prijs), en geef je per product aan of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
   - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas) en een lettertype voor de hele app. Geldt voor alle apparaten van dit restaurant.
   - **Plattegrond**: een rooster waarop je tafels, stoelen en banken kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen. Een stoel kun je draaien: klik 'm nogmaals aan met het Stoel-gereedschap om 'm 90° te roteren (gebruik Wissen om 'm te verwijderen). Een bank kies je liggend of staand en met een zelf in te stellen grootte (2 t/m 6 plekken); klik daarna op het vakje waar de bank moet beginnen.
 
@@ -123,6 +124,8 @@ restaurants/
     naam: "De Gouden Pan"
     menu/
       -Nabc.../ { naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, uitverkocht }
+    categorieen/
+      -Ncat.../ { naam, aangemaakt }   ← aan te maken/verwijderen in Instellingen > Producten
     leden/
       -Nlid.../ {
         naam: "Sara",
