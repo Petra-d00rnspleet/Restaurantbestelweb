@@ -688,7 +688,51 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 @media (max-width:700px){
   .menu-form{ grid-template-columns:1fr 1fr; }
 }
-.menu-form input{
+.menu-form input,
+.menu-form select{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:9px 11px;
+  font-size:.88rem;
+}
+.menu-form select:disabled{ opacity:.5; cursor:not-allowed; }
+
+.categorie-lijst{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-bottom:14px;
+}
+.categorie-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:6px 6px 6px 12px;
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--text);
+}
+.categorie-chip__x{
+  background:none;
+  border:none;
+  color:var(--text-dim);
+  font-size:.85rem;
+  line-height:1;
+  padding:2px 4px;
+}
+.categorie-chip__x:hover{ color:var(--ember); }
+.categorie-form{
+  display:flex;
+  gap:10px;
+  max-width:420px;
+}
+.categorie-form input{
+  flex:1;
   background:var(--bg-2);
   border:1px solid var(--line);
   color:var(--text);
@@ -1115,9 +1159,41 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   margin-bottom:8px;
 }
 .nieuws-teaser__regel{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
   font-size:.85rem;
   color:var(--text-dim);
   padding:4px 0;
+}
+.nieuws-teaser__gelezen{
+  flex-shrink:0;
+  background:none;
+  border:none;
+  color:var(--text-dim);
+  font-family:var(--mono);
+  font-size:.66rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  padding:0;
+}
+.nieuws-teaser__gelezen:hover{ color:var(--flame); }
+
+.landing__mijn-restaurants{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  align-items:center;
+}
+.landing__limiet{
+  color:var(--text-dim);
+  font-size:.85rem;
+  max-width:420px;
+  margin:0;
+  line-height:1.5;
 }
 
 .product-card__emoji{ font-size:1.6rem; margin-bottom:6px; line-height:1; }
