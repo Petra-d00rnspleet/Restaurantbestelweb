@@ -8,7 +8,13 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
 - **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
-- **Instellingen**: bekijk/deel de restaurantcode, beheer het menu, beheer het team, en bekijk systeemupdates.
+- **Instellingen**: onderverdeeld in vier tabbladen:
+  - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), systeemupdates, restaurant verlaten.
+  - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie).
+  - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen achtergrond- en tekstkleur instellen — geldt voor alle apparaten van dit restaurant.
+  - **Plattegrond**: een rooster waarop je tafels en stoelen kunt plaatsen om de indeling van je restaurant weer te geven.
+
+  Producten, Achtergrond en Plattegrond zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht (zie Team & rechten hieronder).
 
 ### Team & rechten
 
@@ -116,6 +122,12 @@ restaurants/
         eigenaar: false,
         rechten: { bestellen: true, keuken: false, bezorgen: false, historie: false, instellingen: false }
       }
+    thema/
+      achtergrond: "#150f0b"
+      tekst: "#f3ead9"
+    plattegrond/
+      "2-5": { type: "tafel" }
+      "2-6": { type: "stoel" }
     bestellingen/
       -Nxyz.../ {
         items: [{ naam, prijs, aantal, notitie }],
