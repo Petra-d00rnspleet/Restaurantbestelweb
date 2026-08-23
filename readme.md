@@ -4,18 +4,18 @@ Een klein bestelsysteem voor een restaurant: **Bestellen → Keuken → Bezorgen
 live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
 - **Restaurant maken/joinen**: bij het maken van een restaurant, én bij het joinen met een code, vul je ook je eigen naam in. Zo weet iedereen wie er in het team zit.
-- **Bestellen**: klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
+- **Bestellen**: als er een plattegrond is ingesteld, zie je eerst de plattegrond — klik op een tafel om er een bestelling voor te plaatsen. Een tafel gaat op **bezet** zodra er een bestelling voor is verstuurd, en wordt pas weer **vrij** als je op "Tafel betaald" klikt. Er is ook altijd de optie "Bestelling zonder tafel" voor een bestelling die niet aan een tafel gekoppeld is. Klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
 - **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
-- **Instellingen**: onderverdeeld in vijf tabbladen:
+- **Voorraad**: een eigen tabblad naast Historie, waar je elk product op **uitverkocht** kunt zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
+- **Instellingen**: onderverdeeld in vier tabbladen:
   - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), systeemupdates, restaurant verlaten.
-  - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie), en per product aangeven of gasten een **ijskeuze** en/of **slagroomkeuze** krijgen bij het bestellen.
-  - **Voorraad**: elk product op **uitverkocht** zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
-  - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen achtergrond- en tekstkleur instellen — geldt voor alle apparaten van dit restaurant.
-  - **Plattegrond**: een rooster waarop je tafels en stoelen kunt plaatsen om de indeling van je restaurant weer te geven.
+  - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie), en per product aangeven of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
+  - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas) en een lettertype voor de hele app. Geldt voor alle apparaten van dit restaurant.
+  - **Plattegrond**: een rooster waarop je tafels en stoelen kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen.
 
-  Producten, Voorraad, Achtergrond en Plattegrond zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht (zie Team & rechten hieronder).
+  Producten, Achtergrond en Plattegrond (in Instellingen) zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht; hetzelfde recht bepaalt ook of het losse Voorraad-tabblad zichtbaar is (zie Team & rechten hieronder).
 
 ### Team & rechten
 
@@ -126,8 +126,10 @@ restaurants/
     thema/
       achtergrond: "#150f0b"
       tekst: "#f3ead9"
+      patroon: "vlam"        ← optioneel, zie PATROON_OPTIES in app.js
+      lettertype: "poppins"  ← optioneel, zie LETTERTYPE_OPTIES in app.js
     plattegrond/
-      "2-5": { type: "tafel" }
+      "2-5": { type: "tafel", nummer: 1, bezet: false }
       "2-6": { type: "stoel" }
     bestellingen/
       -Nxyz.../ {
