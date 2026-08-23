@@ -17,11 +17,15 @@ const state = {
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken | joinen
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
+  instellingenTab: "algemeen", // algemeen | producten | achtergrond | plattegrond
   menu: {},
   bestellingen: {},
   historie: {},
   leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
   ledenGeladen: false,
+  thema: null,                 // { achtergrond, tekst } — eigen kleuren voor dit restaurant
+  plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
+  plattegrondTool: "tafel",
   siteUpdates: {},
   beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
   winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
@@ -61,6 +65,28 @@ function opslaanRestaurant(code, naam){
   localStorage.setItem("ticket_code", code);
   localStorage.setItem("ticket_naam", naam);
 }
+function restaurantNaamWijzigen(nieuweNaam){
+  nieuweNaam = (nieuweNaam || "").trim();
+  if(!nieuweNaam) return;
+  db.ref("restaurants/" + state.restaurantCode + "/naam").set(nieuweNaam).then(() => {
+    toonToast("Restaurantnaam bijgewerkt");
+  });
+}
+// Past de gekozen achtergrond- en tekstkleur van dit restaurant toe op de pagina.
+function toepassenThema(thema){
+  document.body.style.background = thema && thema.achtergrond ? thema.achtergrond : "";
+  if(thema && thema.tekst){
+    document.documentElement.style.setProperty("--text", thema.tekst);
+  } else {
+    document.documentElement.style.removeProperty("--text");
+  }
+}
+function themaWijzigen(veld, waarde){
+  db.ref("restaurants/" + state.restaurantCode + "/thema/" + veld).set(waarde);
+}
+function themaPresetKiezen(achtergrond, tekst){
+  db.ref("restaurants/" + state.restaurantCode + "/thema").update({ achtergrond, tekst });
+}
 function opslaanLid(ledId, naam){
   state.ledId = ledId;
   state.gebruikersNaam = naam;
@@ -72,16 +98,22 @@ function restaurantVerlaten(){
   localStorage.removeItem("ticket_naam");
   localStorage.removeItem("ticket_lid_id");
   localStorage.removeItem("ticket_lid_naam");
+  db.ref("restaurants/" + state.restaurantCode + "/naam").off();
   db.ref("restaurants/" + state.restaurantCode + "/menu").off();
   db.ref("restaurants/" + state.restaurantCode + "/bestellingen").off();
   db.ref("restaurants/" + state.restaurantCode + "/historie").off();
   db.ref("restaurants/" + state.restaurantCode + "/leden").off();
+  db.ref("restaurants/" + state.restaurantCode + "/thema").off();
+  db.ref("restaurants/" + state.restaurantCode + "/plattegrond").off();
   state.restaurantCode = null;
   state.restaurantNaam = null;
   state.ledId = null;
   state.gebruikersNaam = null;
   state.leden = {};
   state.ledenGeladen = false;
+  state.thema = null;
+  state.plattegrond = {};
+  toepassenThema(null);
   state.actiefInRestaurant = false;
   state.landingScherm = "start";
   state.winkelwagen = {};
@@ -169,6 +201,13 @@ function startRestaurant(){
   state.foutmelding = "";
   state.actiefInRestaurant = true;
   const code = state.restaurantCode;
+  db.ref("restaurants/" + code + "/naam").on("value", snap => {
+    if(snap.exists()){
+      state.restaurantNaam = snap.val();
+      localStorage.setItem("ticket_naam", snap.val());
+      render();
+    }
+  });
   db.ref("restaurants/" + code + "/menu").on("value", snap => {
     state.menu = snap.val() || {};
     render();
@@ -184,6 +223,15 @@ function startRestaurant(){
   db.ref("restaurants/" + code + "/leden").on("value", snap => {
     state.leden = snap.val() || {};
     state.ledenGeladen = true;
+    render();
+  });
+  db.ref("restaurants/" + code + "/thema").on("value", snap => {
+    state.thema = snap.val() || null;
+    toepassenThema(state.thema);
+    render();
+  });
+  db.ref("restaurants/" + code + "/plattegrond").on("value", snap => {
+    state.plattegrond = snap.val() || {};
     render();
   });
   render();
@@ -251,6 +299,23 @@ function ledRechtToggle(ledId, recht, waarde){
 function ledVerwijderen(ledId){
   if(!confirm("Dit teamlid verwijderen? Diegene moet opnieuw joinen om weer toegang te krijgen.")) return;
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
+}
+
+// ---------- plattegrond (tafels & stoelen) ----------
+function plattegrondCelKlikken(cel){
+  if(!heeftRecht('instellingen')) return;
+  const tool = state.plattegrondTool;
+  const huidige = (state.plattegrond || {})[cel];
+  const ref = db.ref("restaurants/" + state.restaurantCode + "/plattegrond/" + cel);
+  if(tool === "wissen"){
+    if(huidige) ref.remove();
+    return;
+  }
+  if(huidige && huidige.type === tool){
+    ref.remove();
+  } else {
+    ref.set({ type: tool });
+  }
 }
 
 // ---------- systeemupdates (site-breed, alleen beheerder mag schrijven) ----------
@@ -629,27 +694,43 @@ function renderHistorie(){
     </div>`;
 }
 
+// ============================================================
+// INSTELLINGEN — met subnavigatie: Algemeen / Producten / Achtergrond / Plattegrond
+// ============================================================
+const THEMA_PRESETS = [
+  { naam:"Kastanje",   achtergrond:"#150f0b", tekst:"#f3ead9" },
+  { naam:"Middernacht", achtergrond:"#0d1420", tekst:"#e8eef7" },
+  { naam:"Olijf",      achtergrond:"#1b2016", tekst:"#eef2e6" },
+  { naam:"Bordeaux",   achtergrond:"#1f0d12", tekst:"#f5e6ea" },
+  { naam:"Grafiet",    achtergrond:"#161616", tekst:"#f1f1f1" },
+  { naam:"Crème",      achtergrond:"#f2ead9", tekst:"#241a12" },
+];
+
 function renderInstellingen(){
-  const menuArr = Object.entries(state.menu || {});
-  const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
-    <li>
-      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
-      <span style="display:flex; align-items:center; gap:10px;">
-        <span>${euro(i.prijs)}</span>
-        <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
-      </span>
-    </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
+  const subtabs = [{ key:"algemeen", label:"Algemeen" }];
+  if(heeftRecht('instellingen')) subtabs.push({ key:"producten", label:"Producten" });
+  if(heeftRecht('instellingen')) subtabs.push({ key:"achtergrond", label:"Achtergrond" });
+  if(heeftRecht('instellingen')) subtabs.push({ key:"plattegrond", label:"Plattegrond" });
 
-  const emojiGrid = state.emojiPickerOpen ? `
-    <div class="emoji-grid">
-      ${Object.entries(EMOJI_CATEGORIEEN).map(([cat, lijst]) => `
-        <div class="emoji-grid__categorie">${cat}</div>
-        <div class="emoji-grid__rij">
-          ${lijst.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
-        </div>
-      `).join("")}
-    </div>` : "";
+  if(!subtabs.some(t => t.key === state.instellingenTab)) state.instellingenTab = subtabs[0].key;
 
+  const subnavHtml = subtabs.map(t =>
+    `<button class="subtab ${state.instellingenTab===t.key?'actief':''}" data-action="instellingen-subtab" data-tab="${t.key}">${t.label}</button>`
+  ).join("");
+
+  let inhoudHtml = "";
+  if(state.instellingenTab === "algemeen") inhoudHtml = renderInstellingenAlgemeen();
+  else if(state.instellingenTab === "producten") inhoudHtml = renderInstellingenProducten();
+  else if(state.instellingenTab === "achtergrond") inhoudHtml = renderInstellingenAchtergrond();
+  else if(state.instellingenTab === "plattegrond") inhoudHtml = renderPlattegrond();
+
+  return `
+    <h2 class="view-titel">Instellingen</h2>
+    <div class="subtabs">${subnavHtml}</div>
+    ${inhoudHtml}`;
+}
+
+function renderInstellingenAlgemeen(){
   const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
   const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
     const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
@@ -691,7 +772,14 @@ function renderInstellingen(){
     </div>` : "";
 
   return `
-    <h2 class="view-titel">Instellingen</h2>
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Restaurantnaam</div>
+      ${heeftRecht('instellingen') ? `
+        <div class="naam-wijzig-form">
+          <input id="restaurant-naam-invoer" value="${state.restaurantNaam}">
+          <button class="btn btn--flame btn--sm" data-action="naam-opslaan">Opslaan</button>
+        </div>` : `<div>${state.restaurantNaam}</div>`}
+    </div>
 
     <div class="instel-blok">
       <div class="instel-blok__titel">Restaurantcode</div>
@@ -701,22 +789,6 @@ function renderInstellingen(){
       </div>
       <p style="color:var(--text-dim); font-size:.82rem; margin-top:12px;">Deel deze code met collega's zodat zij kunnen joinen op hun eigen apparaat.</p>
     </div>
-
-    ${heeftRecht('instellingen') ? `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Menu beheren</div>
-      <div class="menu-form">
-        <div class="emoji-kiezer">
-          <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
-          ${emojiGrid}
-        </div>
-        <input id="menu-naam" placeholder="Productnaam">
-        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)">
-        <input id="menu-categorie" placeholder="Categorie">
-        <button class="btn btn--flame" data-action="menu-toevoegen">Toevoegen</button>
-      </div>
-      <ul class="menu-lijst">${menuHtml}</ul>
-    </div>` : ""}
 
     ${teamHtml}
 
@@ -742,6 +814,105 @@ function renderInstellingen(){
     <div class="instel-blok">
       <div class="instel-blok__titel">Restaurant verlaten</div>
       <button class="btn btn--ghost" data-action="verlaat-restaurant">Verlaat dit restaurant op dit apparaat</button>
+    </div>`;
+}
+
+function renderInstellingenProducten(){
+  const menuArr = Object.entries(state.menu || {});
+  const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
+    <li>
+      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
+      <span style="display:flex; align-items:center; gap:10px;">
+        <span>${euro(i.prijs)}</span>
+        <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
+      </span>
+    </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
+
+  const emojiGrid = state.emojiPickerOpen ? `
+    <div class="emoji-grid">
+      ${Object.entries(EMOJI_CATEGORIEEN).map(([cat, lijst]) => `
+        <div class="emoji-grid__categorie">${cat}</div>
+        <div class="emoji-grid__rij">
+          ${lijst.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
+        </div>
+      `).join("")}
+    </div>` : "";
+
+  return `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Producten</div>
+      <div class="menu-form">
+        <div class="emoji-kiezer">
+          <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
+          ${emojiGrid}
+        </div>
+        <input id="menu-naam" placeholder="Productnaam">
+        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)">
+        <input id="menu-categorie" placeholder="Categorie">
+        <button class="btn btn--flame" data-action="menu-toevoegen">Toevoegen</button>
+      </div>
+      <ul class="menu-lijst">${menuHtml}</ul>
+    </div>`;
+}
+
+function renderInstellingenAchtergrond(){
+  const huidig = state.thema || {};
+  const huidigeAchtergrond = huidig.achtergrond || "#150f0b";
+  const huidigeTekst = huidig.tekst || "#f3ead9";
+
+  const presetsHtml = THEMA_PRESETS.map(p => `
+    <button type="button" class="thema-swatch ${huidigeAchtergrond.toLowerCase()===p.achtergrond.toLowerCase() && huidigeTekst.toLowerCase()===p.tekst.toLowerCase() ? 'actief':''}"
+      style="background:${p.achtergrond}; color:${p.tekst};"
+      data-action="thema-preset" data-bg="${p.achtergrond}" data-tekst="${p.tekst}">
+      Aa<br><span>${p.naam}</span>
+    </button>`).join("");
+
+  return `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Achtergrond</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Kies een kant-en-klare combinatie, of stel je eigen achtergrond- en tekstkleur in. Dit geldt voor alle apparaten van dit restaurant.</p>
+      <div class="thema-swatches">${presetsHtml}</div>
+
+      <div class="thema-eigen">
+        <div class="thema-eigen__rij">
+          <label>Achtergrondkleur</label>
+          <input type="color" value="${huidigeAchtergrond}" data-action="thema-achtergrond">
+        </div>
+        <div class="thema-eigen__rij">
+          <label>Tekstkleur</label>
+          <input type="color" value="${huidigeTekst}" data-action="thema-tekst">
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderPlattegrond(){
+  const magBewerken = heeftRecht('instellingen');
+  const RIJEN = 7, KOLOMMEN = 12;
+  let cellenHtml = "";
+  for(let r=0;r<RIJEN;r++){
+    for(let c=0;c<KOLOMMEN;c++){
+      const key = r + "-" + c;
+      const obj = (state.plattegrond || {})[key];
+      const inhoud = obj ? (obj.type === "tafel" ? "🍽️" : "🪑") : "";
+      cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+obj.type):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
+    }
+  }
+
+  return `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Plattegrond</div>
+      ${magBewerken ? `
+        <div class="plattegrond-tools">
+          <button type="button" class="btn btn--sm ${state.plattegrondTool==='tafel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="tafel">🍽️ Tafel</button>
+          <button type="button" class="btn btn--sm ${state.plattegrondTool==='stoel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="stoel">🪑 Stoel</button>
+          <button type="button" class="btn btn--sm ${state.plattegrondTool==='wissen'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="wissen">🧹 Wissen</button>
+        </div>
+        <p style="color:var(--text-dim); font-size:.8rem; margin:12px 0 16px;">Kies hierboven wat je wilt plaatsen en klik daarna op een vakje. Nogmaals klikken met hetzelfde gereedschap haalt het weer weg.</p>
+      ` : ""}
+      <div class="plattegrond-wrap">
+        <div class="plattegrond-grid" style="grid-template-columns:repeat(${KOLOMMEN}, 1fr);">${cellenHtml}</div>
+      </div>
     </div>`;
 }
 
@@ -804,6 +975,14 @@ root.addEventListener("click", e => {
 
     case "lid-verwijderen": ledVerwijderen(id); break;
 
+    case "instellingen-subtab": state.instellingenTab = el.dataset.tab; render(); break;
+    case "naam-opslaan":
+      restaurantNaamWijzigen(document.getElementById("restaurant-naam-invoer").value);
+      break;
+    case "thema-preset": themaPresetKiezen(el.dataset.bg, el.dataset.tekst); break;
+    case "plattegrond-tool": state.plattegrondTool = el.dataset.tool; render(); break;
+    case "plattegrond-cel": plattegrondCelKlikken(el.dataset.cel); break;
+
     case "emoji-toggle": state.emojiPickerOpen = !state.emojiPickerOpen; render(); break;
     case "emoji-kies": state.nieuwProductEmoji = el.dataset.emoji; state.emojiPickerOpen = false; render(); break;
 
@@ -837,6 +1016,8 @@ root.addEventListener("change", e => {
   const id = el.dataset.id;
   if(action === "recht-toggle") ledRechtToggle(id, el.dataset.recht, el.checked);
   if(action === "functie-wijzigen") ledFunctieWijzigen(id, el.value);
+  if(action === "thema-achtergrond") themaWijzigen("achtergrond", el.value);
+  if(action === "thema-tekst") themaWijzigen("tekst", el.value);
 });
 
 // ============================================================
