@@ -45,7 +45,7 @@ const state = {
 const MERKNAAM = "Restaurants";
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
-const BEHEERDER_WACHTWOORD = "Doehan@444734!#RSanipi.NL";
+const BEHEERDER_WACHTWOORD = "LARSSTIKERINJONGESUKKELMAN!!#";
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
