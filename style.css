@@ -423,6 +423,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   transition:opacity .12s ease, transform .12s ease;
 }
 .product-card:hover .product-card__plus{ opacity:1; transform:scale(1); }
+.product-card__opties{ font-size:.85rem; margin-left:2px; }
+.product-card--uitverkocht{
+  opacity:.45;
+  cursor:not-allowed;
+}
+.product-card--uitverkocht:hover{ transform:none; border-color:var(--line); }
+.product-card__uitverkocht-badge{
+  position:absolute; top:10px; right:10px;
+  font-family:var(--mono);
+  font-size:.6rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  background:var(--ember);
+  color:#1a0f08;
+  padding:2px 6px;
+  border-radius:10px;
+}
 
 .wagen{
   background:var(--panel);
@@ -469,6 +486,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   font-size:.9rem;
 }
 .wagen__aantal button:hover{ border-color:var(--flame); color:var(--flame); }
+.wagen__select{
+  width:100%;
+  margin-top:8px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:.78rem;
+  padding:7px 9px;
+}
+.wagen__checkbox{
+  display:flex; align-items:center; gap:7px;
+  margin-top:8px;
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--text-dim);
+}
+.wagen__checkbox input{ accent-color:var(--flame); }
 .wagen__notitie{
   width:100%;
   margin-top:8px;
@@ -653,6 +689,41 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   padding:9px 11px;
   font-size:.88rem;
 }
+
+.menu-form__opties{
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+  margin:-8px 0 18px;
+}
+.menu-form__optie{
+  display:flex; align-items:center; gap:7px;
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--text-dim);
+}
+.menu-form__optie input{ accent-color:var(--flame); }
+
+.cat--uitverkocht{ color:var(--ember) !important; }
+
+.voorraad-lijst{ list-style:none; margin:0; padding:0; }
+.voorraad-rij{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:.9rem;
+}
+.voorraad-rij:last-child{ border-bottom:none; }
+.voorraad-rij--uitverkocht .voorraad-rij__naam{ color:var(--text-dim); text-decoration:line-through; }
+.voorraad-toggle{
+  display:flex; align-items:center; gap:7px;
+  font-family:var(--mono);
+  font-size:.72rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-dim);
+}
+.voorraad-toggle input{ accent-color:var(--ember); }
 
 .emoji-kiezer{ position:relative; }
 .emoji-kiezer__knop{
