@@ -8,12 +8,42 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const root = document.getElementById("app");
 
+// ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
+// Migreert automatisch vanaf de oude opslag (vóór meerdere restaurants per apparaat mogelijk waren).
+function laadMijnRestaurants(){
+  try {
+    const raw = localStorage.getItem("ticket_restaurants");
+    if(raw) return JSON.parse(raw) || [];
+  } catch(e) {}
+  const oudeCode = localStorage.getItem("ticket_code");
+  if(oudeCode){
+    const migratie = [{
+      code: oudeCode,
+      naam: localStorage.getItem("ticket_naam") || oudeCode,
+      ledId: localStorage.getItem("ticket_lid_id") || null,
+      gebruikersNaam: localStorage.getItem("ticket_lid_naam") || "",
+    }];
+    localStorage.setItem("ticket_restaurants", JSON.stringify(migratie));
+    localStorage.removeItem("ticket_code");
+    localStorage.removeItem("ticket_naam");
+    localStorage.removeItem("ticket_lid_id");
+    localStorage.removeItem("ticket_lid_naam");
+    return migratie;
+  }
+  return [];
+}
+function laadGelezenUpdates(){
+  try { return JSON.parse(localStorage.getItem("ticket_gelezen_updates") || "[]") || []; }
+  catch(e){ return []; }
+}
+
 // ---------- status ----------
 const state = {
-  restaurantCode: localStorage.getItem("ticket_code") || null,
-  restaurantNaam: localStorage.getItem("ticket_naam") || null,
-  ledId: localStorage.getItem("ticket_lid_id") || null,       // jouw teamlid-id binnen dit restaurant
-  gebruikersNaam: localStorage.getItem("ticket_lid_naam") || null, // jouw eigen naam
+  restaurantCode: null,
+  restaurantNaam: null,
+  ledId: null,                 // jouw teamlid-id binnen dit restaurant
+  gebruikersNaam: null,        // jouw eigen naam
+  mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam}] — max 2 per apparaat
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken | joinen
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
@@ -21,12 +51,14 @@ const state = {
   menu: {},
   bestellingen: {},
   historie: {},
+  categorieen: {},             // categorieën van het huidige restaurant
   leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
   ledenGeladen: false,
   thema: null,                 // { achtergrond, tekst } — eigen kleuren voor dit restaurant
   plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
   plattegrondTool: "tafel",
   siteUpdates: {},
+  gelezenUpdates: laadGelezenUpdates(),   // ids van systeemupdates die je al als gelezen hebt gemarkeerd
   beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
   beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
   beheerFoutmelding: "",
@@ -43,9 +75,10 @@ const state = {
 };
 
 const MERKNAAM = "Restaurants";
+const MAX_RESTAURANTS_PER_PERSOON = 2;
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
-const BEHEERDER_WACHTWOORD = "LARSSTIKERINJONGESUKKELMAN!!#";
+const BEHEERDER_WACHTWOORD = "1234567890ENNUOPFLIKKERENLARS!";
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
@@ -89,11 +122,19 @@ const LETTERTYPE_OPTIES = [
 ];
 
 // ---------- helpers ----------
-function opslaanRestaurant(code, naam){
-  state.restaurantCode = code;
-  state.restaurantNaam = naam;
-  localStorage.setItem("ticket_code", code);
-  localStorage.setItem("ticket_naam", naam);
+// Slaat (of werkt bij) een restaurant op in de lijst "mijn restaurants" van dit apparaat.
+function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam){
+  const index = state.mijnRestaurants.findIndex(r => r.code === code);
+  const entry = { code, naam, ledId, gebruikersNaam };
+  if(index >= 0) state.mijnRestaurants[index] = entry;
+  else state.mijnRestaurants.push(entry);
+  localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+}
+// Haalt een restaurant uit de lijst "mijn restaurants" — gebeurt alleen automatisch (verwijderd
+// door eigenaar of sitebeheer), nooit doordat iemand zelf op een "verlaten"-knop klikt.
+function mijnRestaurantVerwijderenUitLijst(code){
+  state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
+  localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
 }
 function restaurantNaamWijzigen(nieuweNaam){
   nieuweNaam = (nieuweNaam || "").trim();
@@ -145,24 +186,22 @@ function themaWijzigen(veld, waarde){
 function themaPresetKiezen(achtergrond, tekst){
   db.ref("restaurants/" + state.restaurantCode + "/thema").update({ achtergrond, tekst });
 }
-function opslaanLid(ledId, naam){
-  state.ledId = ledId;
-  state.gebruikersNaam = naam;
-  localStorage.setItem("ticket_lid_id", ledId);
-  localStorage.setItem("ticket_lid_naam", naam);
-}
-function restaurantVerlaten(){
-  localStorage.removeItem("ticket_code");
-  localStorage.removeItem("ticket_naam");
-  localStorage.removeItem("ticket_lid_id");
-  localStorage.removeItem("ticket_lid_naam");
-  db.ref("restaurants/" + state.restaurantCode + "/naam").off();
-  db.ref("restaurants/" + state.restaurantCode + "/menu").off();
-  db.ref("restaurants/" + state.restaurantCode + "/bestellingen").off();
-  db.ref("restaurants/" + state.restaurantCode + "/historie").off();
-  db.ref("restaurants/" + state.restaurantCode + "/leden").off();
-  db.ref("restaurants/" + state.restaurantCode + "/thema").off();
-  db.ref("restaurants/" + state.restaurantCode + "/plattegrond").off();
+// Sluit de live-verbindingen met het huidige restaurant af en gaat terug naar het startscherm.
+// Dit is GEEN "restaurant verlaten" — het restaurant blijft gewoon in je lijst "mijn restaurants"
+// staan, dit is puur even wisselen. Verwijderen uit die lijst gebeurt alleen automatisch
+// (zie mijnRestaurantVerwijderenUitLijst), nooit via een knop die de gebruiker zelf indrukt.
+function verlaatHuidigRestaurant(){
+  const code = state.restaurantCode;
+  if(code){
+    db.ref("restaurants/" + code + "/naam").off();
+    db.ref("restaurants/" + code + "/menu").off();
+    db.ref("restaurants/" + code + "/bestellingen").off();
+    db.ref("restaurants/" + code + "/historie").off();
+    db.ref("restaurants/" + code + "/leden").off();
+    db.ref("restaurants/" + code + "/thema").off();
+    db.ref("restaurants/" + code + "/plattegrond").off();
+    db.ref("restaurants/" + code + "/categorieen").off();
+  }
   state.restaurantCode = null;
   state.restaurantNaam = null;
   state.ledId = null;
@@ -171,6 +210,7 @@ function restaurantVerlaten(){
   state.ledenGeladen = false;
   state.thema = null;
   state.plattegrond = {};
+  state.categorieen = {};
   toepassenThema(null);
   state.actiefInRestaurant = false;
   state.landingScherm = "start";
@@ -210,6 +250,10 @@ function toonToast(tekst){
 function restaurantMaken(naam, eigenNaam){
   naam = naam.trim();
   eigenNaam = (eigenNaam || "").trim();
+  if(state.mijnRestaurants.length >= MAX_RESTAURANTS_PER_PERSOON){
+    state.foutmelding = `Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum.`;
+    render(); return;
+  }
   if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
   if(!eigenNaam){ state.foutmelding = "Vul je eigen naam in."; render(); return; }
   const code = genereerCode();
@@ -219,16 +263,23 @@ function restaurantMaken(naam, eigenNaam){
     menu: {},
   }).then(() => {
     const ledRef = db.ref("restaurants/" + code + "/leden").push();
-    return ledRef.set({
-      naam: eigenNaam,
-      functie: "Eigenaar",
-      eigenaar: true,
-      rechten: { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true },
-      aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-    }).then(() => ledRef.key);
+    const catRef = db.ref("restaurants/" + code + "/categorieen").push();
+    return Promise.all([
+      ledRef.set({
+        naam: eigenNaam,
+        functie: "Eigenaar",
+        eigenaar: true,
+        rechten: { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true },
+        aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+      }),
+      catRef.set({ naam: "Overig", aangemaakt: firebase.database.ServerValue.TIMESTAMP }),
+    ]).then(() => ledRef.key);
   }).then(ledId => {
-    opslaanLid(ledId, eigenNaam);
-    opslaanRestaurant(code, naam);
+    mijnRestaurantOpslaan(code, naam, ledId, eigenNaam);
+    state.restaurantCode = code;
+    state.restaurantNaam = naam;
+    state.ledId = ledId;
+    state.gebruikersNaam = eigenNaam;
     startRestaurant();
   });
 }
@@ -237,6 +288,20 @@ function restaurantJoinen(codeInvoer, eigenNaam){
   eigenNaam = (eigenNaam || "").trim();
   if(!code){ state.foutmelding = "Vul een code in."; render(); return; }
   if(!eigenNaam){ state.foutmelding = "Vul je naam in."; render(); return; }
+  const bestaandLid = state.mijnRestaurants.find(r => r.code === code);
+  if(bestaandLid){
+    // Je bent hier op dit apparaat al lid van — gewoon doorgaan i.p.v. opnieuw joinen.
+    state.restaurantCode = bestaandLid.code;
+    state.restaurantNaam = bestaandLid.naam;
+    state.ledId = bestaandLid.ledId;
+    state.gebruikersNaam = bestaandLid.gebruikersNaam;
+    startRestaurant();
+    return;
+  }
+  if(state.mijnRestaurants.length >= MAX_RESTAURANTS_PER_PERSOON){
+    state.foutmelding = `Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum.`;
+    render(); return;
+  }
   db.ref("restaurants/" + code).once("value").then(snap => {
     if(!snap.exists()){
       state.foutmelding = "Geen restaurant gevonden met code " + code + ".";
@@ -250,8 +315,11 @@ function restaurantJoinen(codeInvoer, eigenNaam){
         rechten: { ...STANDAARD_RECHTEN },
         aangemaakt: firebase.database.ServerValue.TIMESTAMP,
       }).then(() => {
-        opslaanLid(ledRef.key, eigenNaam);
-        opslaanRestaurant(code, snap.val().naam);
+        mijnRestaurantOpslaan(code, snap.val().naam, ledRef.key, eigenNaam);
+        state.restaurantCode = code;
+        state.restaurantNaam = snap.val().naam;
+        state.ledId = ledRef.key;
+        state.gebruikersNaam = eigenNaam;
         startRestaurant();
       });
     }
@@ -263,9 +331,16 @@ function startRestaurant(){
   const code = state.restaurantCode;
   db.ref("restaurants/" + code + "/naam").on("value", snap => {
     if(snap.exists()){
-      state.restaurantNaam = snap.val();
-      localStorage.setItem("ticket_naam", snap.val());
+      if(snap.val() !== state.restaurantNaam){
+        state.restaurantNaam = snap.val();
+        mijnRestaurantOpslaan(code, snap.val(), state.ledId, state.gebruikersNaam);
+      }
       render();
+    } else if(state.actiefInRestaurant && !state.beheerBezoekModus){
+      // Restaurant bestaat niet meer (verwijderd via Sitebeheer) — terug naar het startscherm.
+      toonToast("Dit restaurant bestaat niet meer.");
+      mijnRestaurantVerwijderenUitLijst(code);
+      verlaatHuidigRestaurant();
     }
   });
   db.ref("restaurants/" + code + "/menu").on("value", snap => {
@@ -283,6 +358,14 @@ function startRestaurant(){
   db.ref("restaurants/" + code + "/leden").on("value", snap => {
     state.leden = snap.val() || {};
     state.ledenGeladen = true;
+    if(state.ledId && state.actiefInRestaurant && !state.beheerBezoekModus && !state.leden[state.ledId]){
+      // Je bent door de eigenaar als teamlid verwijderd — dat telt als "verwijderd worden",
+      // en maakt dus weer plek vrij in je lijst met restaurants.
+      toonToast("Je bent door de eigenaar uit dit restaurant verwijderd.");
+      mijnRestaurantVerwijderenUitLijst(code);
+      verlaatHuidigRestaurant();
+      return;
+    }
     render();
   });
   db.ref("restaurants/" + code + "/thema").on("value", snap => {
@@ -292,6 +375,10 @@ function startRestaurant(){
   });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => {
     state.plattegrond = snap.val() || {};
+    render();
+  });
+  db.ref("restaurants/" + code + "/categorieen").on("value", snap => {
+    state.categorieen = snap.val() || {};
     render();
   });
   render();
@@ -357,11 +444,11 @@ function historieWissen(){
   db.ref("restaurants/" + state.restaurantCode + "/historie").remove();
 }
 function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze){
-  if(!naam.trim() || !prijs) return;
+  if(!naam.trim() || !prijs || !categorie) return;
   db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
     naam: naam.trim(),
     prijs: parseFloat(prijs.replace(",", ".")) || 0,
-    categorie: categorie.trim() || "Overig",
+    categorie: categorie,
     emoji: emoji || "🍽️",
     ijsKeuze: !!ijsKeuze,
     slagroomKeuze: !!slagroomKeuze,
@@ -373,6 +460,34 @@ function menuItemVerwijderen(id){
 }
 function menuItemUitverkochtWijzigen(id, waarde){
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id + "/uitverkocht").set(!!waarde);
+}
+
+// ---------- categorieën (aan te maken in Instellingen > Producten, te kiezen per product) ----------
+function categorieenGesorteerd(){
+  return Object.entries(state.categorieen || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
+}
+function categorieToevoegen(naam){
+  naam = (naam || "").trim();
+  if(!naam) return;
+  const bestaatAl = Object.values(state.categorieen || {}).some(c => (c.naam||"").toLowerCase() === naam.toLowerCase());
+  if(bestaatAl){ toonToast("Deze categorie bestaat al"); return; }
+  db.ref("restaurants/" + state.restaurantCode + "/categorieen").push().set({
+    naam: naam,
+    aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
+function categorieVerwijderen(id){
+  if(!confirm("Deze categorie verwijderen? Producten die deze categorie al hadden, blijven gewoon bestaan en verschijnen bij Bestellen nog steeds onder hun (oude) categorienaam.")) return;
+  db.ref("restaurants/" + state.restaurantCode + "/categorieen/" + id).remove();
+}
+
+// ---------- systeemupdates als gelezen markeren (alleen lokaal, per apparaat) ----------
+function updateGelezenMarkeren(id){
+  if(!state.gelezenUpdates.includes(id)){
+    state.gelezenUpdates.push(id);
+    localStorage.setItem("ticket_gelezen_updates", JSON.stringify(state.gelezenUpdates));
+  }
+  render();
 }
 
 // ---------- team & rechten (alleen te beheren door de eigenaar van het restaurant) ----------
@@ -476,12 +591,14 @@ function beheerRestaurantBezoeken(code){
   state.ledenGeladen = false;
   state.thema = null;
   state.plattegrond = {};
+  state.categorieen = {};
   db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/bestellingen").on("value", snap => { state.bestellingen = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/historie").on("value", snap => { state.historie = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/leden").on("value", snap => { state.leden = snap.val() || {}; state.ledenGeladen = true; render(); });
   db.ref("restaurants/" + code + "/thema").on("value", snap => { state.thema = snap.val() || null; toepassenThema(state.thema); render(); });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => { state.plattegrond = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/categorieen").on("value", snap => { state.categorieen = snap.val() || {}; render(); });
   render();
 }
 // Sluit het bezoek aan een restaurant af en gaat terug naar het beheerpaneel (tenzij
@@ -495,6 +612,7 @@ function beheerRestaurantVerlaten(doorRender){
     db.ref("restaurants/" + code + "/leden").off();
     db.ref("restaurants/" + code + "/thema").off();
     db.ref("restaurants/" + code + "/plattegrond").off();
+    db.ref("restaurants/" + code + "/categorieen").off();
   }
   toepassenThema(null);
   state.beheerBezoekModus = false;
@@ -506,6 +624,7 @@ function beheerRestaurantVerlaten(doorRender){
   state.ledenGeladen = false;
   state.thema = null;
   state.plattegrond = {};
+  state.categorieen = {};
   state.actiefInRestaurant = false;
   state.winkelwagen = {};
   if(doorRender !== false) render();
@@ -603,32 +722,49 @@ function renderLanding(){
     </div>`;
 
   if(state.landingScherm === "start"){
-    const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0)).slice(0,2);
+    const siteUpdatesArr = Object.entries(state.siteUpdates || {})
+      .filter(([id]) => !state.gelezenUpdates.includes(id))
+      .sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0))
+      .slice(0,2);
     const nieuwsHtml = siteUpdatesArr.length ? `
       <div class="nieuws-teaser">
         <div class="nieuws-teaser__titel">Nieuw in ${MERKNAAM}</div>
-        ${siteUpdatesArr.map(([,u]) => `<div class="nieuws-teaser__regel">${u.titel ? `<b>${u.titel}</b> — ` : ""}${u.tekst}</div>`).join("")}
+        ${siteUpdatesArr.map(([id,u]) => `
+          <div class="nieuws-teaser__regel">
+            <span>${u.titel ? `<b>${u.titel}</b> — ` : ""}${u.tekst}</span>
+            <button type="button" class="nieuws-teaser__gelezen" data-action="update-gelezen" data-id="${id}" title="Verberg deze update op het startscherm">Gelezen ✕</button>
+          </div>`).join("")}
       </div>` : "";
+
+    const restaurantsHtml = state.mijnRestaurants.length ? `
+      <div class="landing__mijn-restaurants">
+        ${state.mijnRestaurants.map(r => `
+          <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" data-code="${r.code}" style="width:320px;">
+            <div class="choice-card__title">Verder naar ${r.naam}</div>
+            <p class="choice-card__desc">Code ${r.code} — ga er direct naartoe.</p>
+          </button>`).join("")}
+      </div>` : "";
+
+    const kanNogMeer = state.mijnRestaurants.length < MAX_RESTAURANTS_PER_PERSOON;
+    const keuzesHtml = kanNogMeer ? `
+      <div class="landing__choices">
+        <button class="choice-card" data-action="ga-maken">
+          <div class="choice-card__title">Restaurant maken</div>
+          <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
+        </button>
+        <button class="choice-card" data-action="ga-joinen">
+          <div class="choice-card__title">Restaurant joinen</div>
+          <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant.</p>
+        </button>
+      </div>` : `
+      <p class="landing__limiet">Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum. Vraag een eigenaar om je als teamlid te verwijderen, of vraag sitebeheer om een restaurant te verwijderen, om weer plek te maken.</p>`;
+
     root.innerHTML = `
       <div class="landing">
         ${merk}
         <p class="landing__sub">Waar wilt u naartoe?</p>
-        ${state.restaurantCode ? `
-          <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" style="width:320px;">
-            <div class="choice-card__title">Verder naar ${state.restaurantNaam}</div>
-            <p class="choice-card__desc">Je hebt hier al een restaurant (code ${state.restaurantCode}) — ga er direct naartoe.</p>
-          </button>
-        ` : ""}
-        <div class="landing__choices">
-          <button class="choice-card" data-action="ga-maken">
-            <div class="choice-card__title">Restaurant maken</div>
-            <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
-          </button>
-          <button class="choice-card" data-action="ga-joinen">
-            <div class="choice-card__title">Restaurant joinen</div>
-            <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant.</p>
-          </button>
-        </div>
+        ${restaurantsHtml}
+        ${keuzesHtml}
         ${nieuwsHtml}
         <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
       </div>`;
@@ -805,7 +941,7 @@ function renderDashboard(){
           ${state.beheerBezoekModus ? `<span class="beheer-badge">🔒 Beheerder-weergave</span>` : ""}
         </div>
         <div style="display:flex; gap:14px; align-items:center;">
-          ${state.beheerBezoekModus ? `<button class="terug-link" style="margin:0;" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>` : ""}
+          ${state.beheerBezoekModus ? `<button class="terug-link" style="margin:0;" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>` : `<button class="terug-link" style="margin:0;" data-action="terug-naar-start">🔀 Wissel restaurant</button>`}
           ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
         </div>
       </header>
@@ -868,7 +1004,12 @@ function renderBestellenPlattegrond(){
 
 function renderBestellenProducten(){
   const menuArr = Object.entries(state.menu || {});
-  const categorieen = [...new Set(menuArr.map(([,i]) => i.categorie || "Overig"))];
+  const categorieVolgorde = categorieenGesorteerd().map(([,c]) => c.naam);
+  const gebruikteCategorieen = [...new Set(menuArr.map(([,i]) => i.categorie || "Overig"))];
+  const categorieen = [
+    ...categorieVolgorde.filter(cat => gebruikteCategorieen.includes(cat)),
+    ...gebruikteCategorieen.filter(cat => !categorieVolgorde.includes(cat)),
+  ];
 
   let productenHtml = "";
   if(menuArr.length === 0){
@@ -1162,11 +1303,14 @@ function renderInstellingenAlgemeen(){
     ${teamHtml}
 
     <div class="instel-blok">
-      <div class="instel-blok__titel">Restaurant verlaten</div>
+      <div class="instel-blok__titel">Dit restaurant</div>
       ${state.beheerBezoekModus ? `
         <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je bekijkt dit restaurant als beheerder — dit apparaat is er geen lid van.</p>
         <button class="btn btn--ghost" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>
-      ` : `<button class="btn btn--ghost" data-action="verlaat-restaurant">Verlaat dit restaurant op dit apparaat</button>`}
+      ` : `
+        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je kunt een restaurant niet zelf verlaten — het blijft in je lijst staan, ook op dit apparaat. Alleen de eigenaar (door jou als teamlid te verwijderen) of sitebeheer (door het hele restaurant te verwijderen) kan het uit je lijst halen.</p>
+        <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel naar een ander restaurant</button>
+      `}
     </div>
 
     <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>`;
@@ -1174,6 +1318,12 @@ function renderInstellingenAlgemeen(){
 
 function renderInstellingenProducten(){
   const menuArr = Object.entries(state.menu || {});
+  const categorieenArr = categorieenGesorteerd();
+  const categorieLijstHtml = categorieenArr.length ? categorieenArr.map(([id,c]) => `
+    <span class="categorie-chip">${c.naam}<button type="button" class="categorie-chip__x" data-action="categorie-verwijder" data-id="${id}" title="Categorie verwijderen">✕</button></span>
+  `).join("") : `<div class="leeg">Nog geen categorieën. Maak er hieronder een aan.</div>`;
+  const categorieOptiesHtml = categorieenArr.map(([,c]) => `<option value="${c.naam}">${c.naam}</option>`).join("");
+
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li>
       <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
@@ -1195,6 +1345,16 @@ function renderInstellingenProducten(){
 
   return `
     <div class="instel-blok">
+      <div class="instel-blok__titel">Categorieën</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Maak hier eerst een categorie aan — die kies je daarna bij het toevoegen van een product. Bij Bestellen staan de producten van elke categorie in een rijtje onder de naam van die categorie.</p>
+      <div class="categorie-lijst">${categorieLijstHtml}</div>
+      <div class="categorie-form">
+        <input id="nieuwe-categorie" placeholder="Nieuwe categorie, bijv. Dranken">
+        <button class="btn btn--flame btn--sm" data-action="categorie-toevoegen">Toevoegen</button>
+      </div>
+    </div>
+
+    <div class="instel-blok">
       <div class="instel-blok__titel">Producten</div>
       <div class="menu-form">
         <div class="emoji-kiezer">
@@ -1203,8 +1363,10 @@ function renderInstellingenProducten(){
         </div>
         <input id="menu-naam" placeholder="Productnaam">
         <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)">
-        <input id="menu-categorie" placeholder="Categorie">
-        <button class="btn btn--flame" data-action="menu-toevoegen">Toevoegen</button>
+        <select id="menu-categorie" ${categorieenArr.length?"":"disabled"}>
+          ${categorieenArr.length ? categorieOptiesHtml : `<option value="">Maak eerst een categorie</option>`}
+        </select>
+        <button class="btn btn--flame" data-action="menu-toevoegen" ${categorieenArr.length?"":"disabled"}>Toevoegen</button>
       </div>
       <div class="menu-form__opties">
         <label class="menu-form__optie">
@@ -1363,14 +1525,24 @@ root.addEventListener("click", e => {
         document.getElementById("input-eigen-naam-joinen").value
       );
       break;
-    case "doorgaan-restaurant": startRestaurant(); break;
+    case "doorgaan-restaurant": {
+      const gekozen = state.mijnRestaurants.find(r => r.code === el.dataset.code);
+      if(gekozen){
+        state.restaurantCode = gekozen.code;
+        state.restaurantNaam = gekozen.naam;
+        state.ledId = gekozen.ledId;
+        state.gebruikersNaam = gekozen.gebruikersNaam;
+        startRestaurant();
+      }
+      break;
+    }
 
     case "wissel-view": state.huidigeView = el.dataset.view; render(); break;
     case "kopieer-code":
       navigator.clipboard?.writeText(state.restaurantCode);
       toonToast("Code gekopieerd: " + state.restaurantCode);
       break;
-    case "verlaat-restaurant": restaurantVerlaten(); break;
+    case "terug-naar-start": verlaatHuidigRestaurant(); break;
 
     case "toevoegen-wagen": toevoegenAanWagen(id, state.menu[id]); break;
     case "wagen-plus": wagenAantalWijzigen(id, 1); break;
@@ -1454,6 +1626,13 @@ root.addEventListener("click", e => {
       render();
       break;
     case "menu-verwijder": menuItemVerwijderen(id); break;
+
+    case "categorie-toevoegen":
+      categorieToevoegen(document.getElementById("nieuwe-categorie").value);
+      break;
+    case "categorie-verwijder": categorieVerwijderen(id); break;
+
+    case "update-gelezen": updateGelezenMarkeren(id); break;
   }
 });
 
