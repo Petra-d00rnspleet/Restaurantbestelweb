@@ -13,7 +13,7 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
   - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), systeemupdates, restaurant verlaten.
   - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie), en per product aangeven of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
   - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas) en een lettertype voor de hele app. Geldt voor alle apparaten van dit restaurant.
-  - **Plattegrond**: een rooster waarop je tafels en stoelen kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen.
+  - **Plattegrond**: een rooster waarop je tafels, stoelen en banken kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen. Een stoel kun je draaien: klik 'm nogmaals aan met het Stoel-gereedschap om 'm 90° te roteren (gebruik Wissen om 'm te verwijderen). Een bank kies je liggend of staand en met een zelf in te stellen grootte (2 t/m 6 plekken); klik daarna op het vakje waar de bank moet beginnen.
 
   Producten, Achtergrond en Plattegrond (in Instellingen) zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht; hetzelfde recht bepaalt ook of het losse Voorraad-tabblad zichtbaar is (zie Team & rechten hieronder).
 
@@ -130,7 +130,10 @@ restaurants/
       lettertype: "poppins"  ← optioneel, zie LETTERTYPE_OPTIES in app.js
     plattegrond/
       "2-5": { type: "tafel", nummer: 1, bezet: false }
-      "2-6": { type: "stoel" }
+      "2-6": { type: "stoel", richting: "boven" }   ← richting: boven|rechts|onder|links (rotatie)
+      "3-2": { type: "bank", bankId: "bank...", oriëntatie: "horizontaal", lengte: 3, volgorde: 0 }
+      "3-3": { type: "bank-deel", bankId: "bank...", oriëntatie: "horizontaal", lengte: 3, volgorde: 1 }
+      "3-4": { type: "bank-deel", bankId: "bank...", oriëntatie: "horizontaal", lengte: 3, volgorde: 2 }
     bestellingen/
       -Nxyz.../ {
         items: [{ naam, prijs, aantal, notitie }],
