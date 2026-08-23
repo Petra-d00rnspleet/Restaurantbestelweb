@@ -984,7 +984,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 .plattegrond__cel:not(:disabled):hover{ border-color:var(--flame); }
 .plattegrond__cel--tafel{ background:var(--panel-2); border-color:var(--flame-dark); position:relative; }
-.plattegrond__cel--stoel{ background:var(--panel-2); border-color:var(--steel-blue); }
+.plattegrond__cel--stoel{ background:var(--panel-2); border-color:var(--steel-blue); transition:transform .15s ease; }
 .plattegrond__cel:disabled{ cursor:default; opacity:.9; }
 .plattegrond__cel--leeg{ background:transparent; border:1px dashed var(--line); opacity:.35; }
 .plattegrond__cel--vrij{ border-color:var(--fresh); }
@@ -1001,6 +1001,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   border-radius:3px;
   padding:0 3px;
   line-height:1.3;
+}
+
+/* Bank: 2 of meer cellen die visueel als één doorlopend element aan elkaar vastzitten. */
+.plattegrond__cel--bank{
+  background:var(--panel-2);
+  border-color:var(--flame-dark);
+  position:relative;
+  z-index:0;
+}
+.plattegrond__cel--bank-h.plattegrond__cel--bank-start{ border-radius:8px 0 0 8px; margin-right:-6px; border-right-color:transparent; }
+.plattegrond__cel--bank-h.plattegrond__cel--bank-midden{ border-radius:0; margin-left:-6px; margin-right:-6px; border-left-color:transparent; border-right-color:transparent; }
+.plattegrond__cel--bank-h.plattegrond__cel--bank-eind{ border-radius:0 8px 8px 0; margin-left:-6px; border-left-color:transparent; }
+.plattegrond__cel--bank-v.plattegrond__cel--bank-start{ border-radius:8px 8px 0 0; margin-bottom:-6px; border-bottom-color:transparent; }
+.plattegrond__cel--bank-v.plattegrond__cel--bank-midden{ border-radius:0; margin-top:-6px; margin-bottom:-6px; border-top-color:transparent; border-bottom-color:transparent; }
+.plattegrond__cel--bank-v.plattegrond__cel--bank-eind{ border-radius:0 0 8px 8px; margin-top:-6px; border-top-color:transparent; }
+
+.plattegrond-bank-opties{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:10px; }
+.plattegrond-bank-opties__groep{ display:flex; gap:8px; }
+.plattegrond-bank-opties__lengte{ display:flex; align-items:center; gap:6px; font-size:.8rem; color:var(--text-dim); }
+.plattegrond-bank-opties__lengte select{
+  background:var(--bg-2); color:var(--text); border:1px solid var(--line); border-radius:4px;
+  padding:6px 8px; font-family:inherit; font-size:.8rem;
 }
 
 .plattegrond-uitleg{ color:var(--text-dim); font-size:.85rem; margin-top:-8px; }
