@@ -28,6 +28,11 @@ const state = {
   plattegrondTool: "tafel",
   siteUpdates: {},
   beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
+  beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
+  beheerFoutmelding: "",
+  alleRestaurants: {},          // alle restaurants in de database, alleen geladen als het beheerpaneel open is
+  alleRestaurantsGeladen: false,
+  beheerBezoekModus: false,     // ben je als beheerder een restaurant van iemand anders aan het bekijken/bewerken?
   winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
   bestelModus: "plattegrond",  // plattegrond | producten — welk scherm van Bestellen actief is (alleen relevant als er tafels zijn ingesteld)
   actieveTafelCel: null,       // welke plattegrondcel ("rij-kolom") er nu besteld wordt, of null
@@ -40,7 +45,7 @@ const state = {
 const MERKNAAM = "Restaurants";
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
-const BEHEERDER_WACHTWOORD = "Sanipi123";
+const BEHEERDER_WACHTWOORD = "Doehan@444734!#RSanipi.NL";
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
@@ -405,23 +410,115 @@ function plattegrondCelKlikken(cel){
   }
 }
 
-// ---------- systeemupdates (site-breed, alleen beheerder mag schrijven) ----------
-function beheerderInloggen(){
-  const invoer = prompt("Beheerderswachtwoord:");
-  if(invoer === null) return;
+// ---------- sitebeheer (wachtwoord-vak voor de eigenaar van de website) ----------
+// Alleen degene met het beheerderswachtwoord (BEHEERDER_WACHTWOORD, bovenin dit bestand)
+// kan dit vak openen. Daar kun je alle restaurants zien/bezoeken/verwijderen en de
+// systeemupdates schrijven.
+function beheerPaneelOpenen(){
+  state.beheerPaneelOpen = true;
+  state.beheerFoutmelding = "";
+  if(state.beheerderActief) alleRestaurantsLuisteren();
+  render();
+}
+function beheerWachtwoordControleren(invoer){
+  invoer = (invoer || "").trim();
+  if(!invoer){ state.beheerFoutmelding = "Vul het beheerderswachtwoord in."; render(); return; }
   if(invoer === BEHEERDER_WACHTWOORD){
     localStorage.setItem("ticket_beheerder", "1");
     state.beheerderActief = true;
-    toonToast("Ingelogd als beheerder");
+    state.beheerFoutmelding = "";
+    alleRestaurantsLuisteren();
     render();
   } else {
-    toonToast("Onjuist wachtwoord");
+    state.beheerFoutmelding = "Onjuist wachtwoord.";
+    render();
   }
 }
 function beheerderUitloggen(){
   localStorage.removeItem("ticket_beheerder");
   state.beheerderActief = false;
+  db.ref("restaurants").off();
+  state.alleRestaurants = {};
+  state.alleRestaurantsGeladen = false;
+  if(state.beheerBezoekModus) beheerRestaurantVerlaten(false);
+  state.beheerPaneelOpen = false;
   render();
+}
+function beheerPaneelSluiten(){
+  if(state.beheerBezoekModus){ beheerRestaurantVerlaten(false); }
+  db.ref("restaurants").off();
+  state.alleRestaurants = {};
+  state.alleRestaurantsGeladen = false;
+  state.beheerPaneelOpen = false;
+  render();
+}
+// Luistert live naar élk restaurant in de database, alleen zolang het beheerpaneel open is.
+function alleRestaurantsLuisteren(){
+  db.ref("restaurants").on("value", snap => {
+    state.alleRestaurants = snap.val() || {};
+    state.alleRestaurantsGeladen = true;
+    render();
+  });
+}
+// Als beheerder een restaurant van iemand anders openen — met volledige rechten, zonder
+// dat dit iets aan je eigen apparaat-instellingen (localStorage) verandert.
+function beheerRestaurantBezoeken(code){
+  const gegevens = state.alleRestaurants[code];
+  if(!gegevens) return;
+  state.beheerBezoekModus = true;
+  state.restaurantCode = code;
+  state.restaurantNaam = gegevens.naam || code;
+  state.ledId = null;               // geen lid van dit restaurant → heeftRecht() staat alles toe
+  state.gebruikersNaam = "Beheerder";
+  state.actiefInRestaurant = true;
+  state.huidigeView = "bestellen";
+  state.leden = {};
+  state.ledenGeladen = false;
+  state.thema = null;
+  state.plattegrond = {};
+  db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/bestellingen").on("value", snap => { state.bestellingen = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/historie").on("value", snap => { state.historie = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/leden").on("value", snap => { state.leden = snap.val() || {}; state.ledenGeladen = true; render(); });
+  db.ref("restaurants/" + code + "/thema").on("value", snap => { state.thema = snap.val() || null; toepassenThema(state.thema); render(); });
+  db.ref("restaurants/" + code + "/plattegrond").on("value", snap => { state.plattegrond = snap.val() || {}; render(); });
+  render();
+}
+// Sluit het bezoek aan een restaurant af en gaat terug naar het beheerpaneel (tenzij
+// doorRender false is, bijv. omdat beheerderUitloggen() zelf al gaat renderen).
+function beheerRestaurantVerlaten(doorRender){
+  const code = state.restaurantCode;
+  if(code){
+    db.ref("restaurants/" + code + "/menu").off();
+    db.ref("restaurants/" + code + "/bestellingen").off();
+    db.ref("restaurants/" + code + "/historie").off();
+    db.ref("restaurants/" + code + "/leden").off();
+    db.ref("restaurants/" + code + "/thema").off();
+    db.ref("restaurants/" + code + "/plattegrond").off();
+  }
+  toepassenThema(null);
+  state.beheerBezoekModus = false;
+  state.restaurantCode = null;
+  state.restaurantNaam = null;
+  state.ledId = null;
+  state.gebruikersNaam = null;
+  state.leden = {};
+  state.ledenGeladen = false;
+  state.thema = null;
+  state.plattegrond = {};
+  state.actiefInRestaurant = false;
+  state.winkelwagen = {};
+  if(doorRender !== false) render();
+}
+function beheerRestaurantVerwijderen(code){
+  const gegevens = state.alleRestaurants[code];
+  const naam = gegevens ? gegevens.naam : code;
+  if(!confirm(`Restaurant "${naam}" (${code}) volledig verwijderen? Dit verwijdert al het menu, alle bestellingen en de hele historie, en kan niet ongedaan gemaakt worden.`)) return;
+  if(state.beheerBezoekModus && state.restaurantCode === code) beheerRestaurantVerlaten(false);
+  db.ref("restaurants/" + code).remove().then(() => {
+    toonToast("Restaurant verwijderd");
+    render();
+  });
 }
 function siteUpdateToevoegen(titel, tekst){
   if(!state.beheerderActief) return;
@@ -488,7 +585,9 @@ function itemExtraHtml(it){
 // RENDER
 // ============================================================
 function render(){
-  if(!state.actiefInRestaurant){
+  if(state.beheerPaneelOpen && !state.beheerBezoekModus){
+    renderBeheerPaneel();
+  } else if(!state.actiefInRestaurant){
     renderLanding();
   } else {
     renderDashboard();
@@ -531,6 +630,7 @@ function renderLanding(){
           </button>
         </div>
         ${nieuwsHtml}
+        <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
       </div>`;
   } else if(state.landingScherm === "maken"){
     root.innerHTML = `
@@ -575,6 +675,103 @@ function renderLanding(){
   }
 }
 
+// ============================================================
+// SITEBEHEER (wachtwoord-vak voor de eigenaar van de website)
+// ============================================================
+function renderBeheerPaneel(){
+  if(!state.beheerderActief){
+    root.innerHTML = `
+      <div class="landing">
+        <div class="landing__mark">
+          <div class="landing__eyebrow">${MERKNAAM}</div>
+          <h1 class="landing__title">Sitebeheer</h1>
+          <div class="landing__divider"><span class="landing__diamond"></span></div>
+        </div>
+        <div class="form-card">
+          <label class="form-card__label">Beheerderswachtwoord</label>
+          <input id="beheer-wachtwoord" type="password" placeholder="••••••••" autofocus>
+          ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : ""}
+          <button class="btn btn--flame btn--block" data-action="beheer-inloggen">Inloggen</button>
+          <button class="terug-link" data-action="beheer-sluiten">← Terug</button>
+        </div>
+      </div>`;
+    const verstuur = () => beheerWachtwoordControleren(document.getElementById("beheer-wachtwoord").value);
+    document.getElementById("beheer-wachtwoord").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
+    return;
+  }
+
+  const restaurantsArr = Object.entries(state.alleRestaurants || {}).sort((a,b) => (b[1].aangemaakt||0)-(a[1].aangemaakt||0));
+  const restaurantsHtml = !state.alleRestaurantsGeladen ? `<div class="leeg">Restaurants laden…</div>`
+    : restaurantsArr.length === 0 ? `<div class="leeg">Nog geen restaurants aangemaakt.</div>`
+    : restaurantsArr.map(([code, r]) => {
+        const aantalLeden = Object.keys(r.leden || {}).length;
+        const aantalProducten = Object.keys(r.menu || {}).length;
+        const aantalOpenstaand = Object.keys(r.bestellingen || {}).length;
+        const aantalHistorie = Object.keys(r.historie || {}).length;
+        const datum = r.aangemaakt ? new Date(r.aangemaakt).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "";
+        return `
+        <div class="beheer-rest-rij">
+          <div class="beheer-rest-rij__info">
+            <div class="beheer-rest-rij__naam">${r.naam || "(zonder naam)"} <span class="team-rij__badge">${code}</span></div>
+            <div class="beheer-rest-rij__meta">
+              ${aantalLeden} teamlid${aantalLeden===1?"":"en"} · ${aantalProducten} product${aantalProducten===1?"":"en"} ·
+              ${aantalOpenstaand} openstaande bestelling${aantalOpenstaand===1?"":"en"} · ${aantalHistorie} in historie
+              ${datum ? ` · aangemaakt ${datum}` : ""}
+            </div>
+          </div>
+          <div class="beheer-rest-rij__acties">
+            <button class="btn btn--steel btn--sm" data-action="beheer-bezoeken" data-id="${code}">Bezoeken</button>
+            <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-verwijderen" data-id="${code}">Verwijderen</button>
+          </div>
+        </div>`;
+      }).join("");
+
+  const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
+  const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
+    const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    return `<li>
+      <div>
+        <span class="update-lijst__datum">${datum}</span>
+        ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
+        <span>${u.tekst}</span>
+      </div>
+      <button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}">✕</button>
+    </li>`;
+  }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
+
+  root.innerHTML = `
+    <div class="shell">
+      <header class="topbar">
+        <div class="topbar__id">
+          <div class="topbar__naam">🔒 Sitebeheer</div>
+        </div>
+        <div style="display:flex; gap:14px; align-items:center;">
+          <button class="terug-link" style="margin:0;" data-action="beheer-uitloggen">Uitloggen</button>
+          <button class="terug-link" style="margin:0;" data-action="beheer-sluiten">← Terug naar ${MERKNAAM}</button>
+        </div>
+      </header>
+      <main class="view">
+        <h2 class="view-titel">Alle restaurants</h2>
+        <div class="instel-blok">
+          <div class="beheer-rest-lijst">${restaurantsHtml}</div>
+        </div>
+
+        <h2 class="view-titel">Systeemupdates</h2>
+        <div class="instel-blok">
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Zichtbaar voor iedereen die ${MERKNAAM} gebruikt.</p>
+          <div class="update-form">
+            <input id="site-update-titel" placeholder="Titel (optioneel)">
+            <div class="update-form__row">
+              <input id="site-update-tekst" placeholder="Wat is er veranderd?">
+              <button class="btn btn--flame" data-action="site-update-toevoegen">Plaatsen</button>
+            </div>
+          </div>
+          <ul class="update-lijst">${siteUpdatesHtml}</ul>
+        </div>
+      </main>
+    </div>`;
+}
+
 function renderDashboard(){
   const bestellingenArr = Object.entries(state.bestellingen || {});
   const aantalNieuw = bestellingenArr.filter(([,b]) => b.status === "nieuw").length;
@@ -605,8 +802,12 @@ function renderDashboard(){
         <div class="topbar__id">
           <div class="topbar__naam">${state.restaurantNaam}</div>
           <button class="topbar__code" data-action="kopieer-code" title="Klik om code te kopiëren">${state.restaurantCode}</button>
+          ${state.beheerBezoekModus ? `<span class="beheer-badge">🔒 Beheerder-weergave</span>` : ""}
         </div>
-        ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
+        <div style="display:flex; gap:14px; align-items:center;">
+          ${state.beheerBezoekModus ? `<button class="terug-link" style="margin:0;" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>` : ""}
+          ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
+        </div>
       </header>
       <nav class="tabs">${tabsHtml}</nav>
       <main class="view" id="view-inhoud"></main>
@@ -912,19 +1113,6 @@ function renderInstellingen(){
 }
 
 function renderInstellingenAlgemeen(){
-  const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
-    const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-    return `<li>
-      <div>
-        <span class="update-lijst__datum">${datum}</span>
-        ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
-        <span>${u.tekst}</span>
-      </div>
-      ${state.beheerderActief ? `<button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}">✕</button>` : ""}
-    </li>`;
-  }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
-
   const eigenLid = state.leden[state.ledId];
   const isEigenaar = !!(eigenLid && eigenLid.eigenaar);
   const ledenArr = Object.entries(state.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
@@ -974,28 +1162,14 @@ function renderInstellingenAlgemeen(){
     ${teamHtml}
 
     <div class="instel-blok">
-      <div class="instel-blok__titel" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>Systeemupdates</span>
-        ${state.beheerderActief
-          ? `<button class="terug-link" style="margin:0;" data-action="beheerder-uitloggen">Uitloggen als beheerder</button>`
-          : `<button class="terug-link" style="margin:0;" data-action="beheerder-inloggen">Inloggen als beheerder</button>`}
-      </div>
-      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Zichtbaar voor iedereen die ${MERKNAAM} gebruikt — alleen de beheerder van de website kan hier iets plaatsen.</p>
-      ${state.beheerderActief ? `
-        <div class="update-form">
-          <input id="site-update-titel" placeholder="Titel (optioneel)">
-          <div class="update-form__row">
-            <input id="site-update-tekst" placeholder="Wat is er veranderd?">
-            <button class="btn btn--flame" data-action="site-update-toevoegen">Plaatsen</button>
-          </div>
-        </div>` : ""}
-      <ul class="update-lijst">${siteUpdatesHtml}</ul>
+      <div class="instel-blok__titel">Restaurant verlaten</div>
+      ${state.beheerBezoekModus ? `
+        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je bekijkt dit restaurant als beheerder — dit apparaat is er geen lid van.</p>
+        <button class="btn btn--ghost" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>
+      ` : `<button class="btn btn--ghost" data-action="verlaat-restaurant">Verlaat dit restaurant op dit apparaat</button>`}
     </div>
 
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Restaurant verlaten</div>
-      <button class="btn btn--ghost" data-action="verlaat-restaurant">Verlaat dit restaurant op dit apparaat</button>
-    </div>`;
+    <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>`;
 }
 
 function renderInstellingenProducten(){
@@ -1211,8 +1385,15 @@ root.addEventListener("click", e => {
     case "historie-verwijder": historieVerwijderen(id); break;
     case "historie-wissen": historieWissen(); break;
 
-    case "beheerder-inloggen": beheerderInloggen(); break;
-    case "beheerder-uitloggen": beheerderUitloggen(); break;
+    case "beheer-open": beheerPaneelOpenen(); break;
+    case "beheer-sluiten": beheerPaneelSluiten(); break;
+    case "beheer-inloggen":
+      beheerWachtwoordControleren(document.getElementById("beheer-wachtwoord").value);
+      break;
+    case "beheer-uitloggen": beheerderUitloggen(); break;
+    case "beheer-bezoeken": beheerRestaurantBezoeken(id); break;
+    case "beheer-verwijderen": beheerRestaurantVerwijderen(id); break;
+    case "beheer-terug-paneel": beheerRestaurantVerlaten(); break;
     case "site-update-toevoegen":
       siteUpdateToevoegen(
         document.getElementById("site-update-titel").value,
