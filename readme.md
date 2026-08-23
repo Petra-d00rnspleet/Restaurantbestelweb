@@ -10,7 +10,7 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
 - **Voorraad**: een eigen tabblad naast Historie, waar je elk product op **uitverkocht** kunt zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
 - **Instellingen**: onderverdeeld in vier tabbladen:
-  - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), systeemupdates, restaurant verlaten.
+  - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), restaurant verlaten.
   - **Producten**: het menu beheren (producten toevoegen/verwijderen met emoji, prijs en categorie), en per product aangeven of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
   - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas) en een lettertype voor de hele app. Geldt voor alle apparaten van dit restaurant.
   - **Plattegrond**: een rooster waarop je tafels, stoelen en banken kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen. Een stoel kun je draaien: klik 'm nogmaals aan met het Stoel-gereedschap om 'm 90° te roteren (gebruik Wissen om 'm te verwijderen). Een bank kies je liggend of staand en met een zelf in te stellen grootte (2 t/m 6 plekken); klik daarna op het vakje waar de bank moet beginnen.
@@ -31,15 +31,22 @@ De tabbladen die iemand te zien krijgt, worden bepaald door die rechten — iema
 verlaten) blijft voor iedereen zichtbaar; menu beheren en team beheren vereisen het
 "Instellingen"-recht (of eigenaarschap).
 
-### Beheerderswachtwoord voor systeemupdates
+### Sitebeheer (alleen voor jou, als eigenaar van de website)
 
-Onder Instellingen staat een **Systeemupdates**-blok dat voor iedereen die de site gebruikt zichtbaar is, maar alleen jij (als bouwer van de site) kunt er iets in plaatsen — inclusief een optionele **titel** per update. Dit werkt met een simpel wachtwoord, ingesteld bovenin `app.js`:
+Onderaan het startscherm (en onderaan Instellingen, als je al in een restaurant zit) staat een subtiele link **"⚙ Sitebeheer"**. Daarachter zit een apart, wachtwoord-beveiligd vak dat alleen jij als bouwer van de site gebruikt — gasten en gewone teamleden zien er verder niets van. Daarin kun je:
+
+- **Alle restaurants** zien die ooit gemaakt zijn, met naam, code, aantal teamleden, aantal producten en aantal (open + historische) bestellingen.
+- Elk restaurant **bezoeken** — je stapt dan met volledige rechten in dat restaurant (Bestellen, Keuken, Bezorgen, Historie, Voorraad én Instellingen), zonder dat dit iets verandert aan je eigen apparaat: jouw eigen restaurantcode in localStorage blijft ongemoeid, en je kunt met "← Terug naar beheerpaneel" weer terug.
+- Elk restaurant **volledig verwijderen** (inclusief menu, bestellingen en historie) — dit kan niet ongedaan gemaakt worden.
+- De **systeemupdates** schrijven en verwijderen (titel + tekst) — dit stond eerder in het Instellingen-tabblad van elk restaurant, maar staat nu alleen nog hier.
+
+Dit werkt met een simpel wachtwoord, ingesteld bovenin `app.js`:
 
 ```js
 const BEHEERDER_WACHTWOORD = "verander-dit-wachtwoord";
 ```
 
-Pas deze waarde aan naar iets alleen bij jou bekends vóórdat je de site publiceert. Let op: dit is een lichte, client-side beveiliging — prima voor een schoolproject of eigen gebruik, maar iemand die in de broncode kijkt kan het wachtwoord vinden. Voor echte beveiliging is Firebase Authentication + strengere databaseregels nodig.
+Pas deze waarde aan naar iets alleen bij jou bekends vóórdat je de site publiceert. Let op: dit is een lichte, client-side beveiliging — prima voor een schoolproject of eigen gebruik, maar iemand die in de broncode kijkt kan het wachtwoord vinden, en de Firebase-databaseregels (zie hieronder) bepalen de échte toegang. Voor echte beveiliging is Firebase Authentication + strengere databaseregels nodig.
 
 Geen server nodig — dit is een pure HTML/CSS/JS site die op **GitHub Pages** kan draaien. Firebase Realtime Database regelt de live synchronisatie.
 
