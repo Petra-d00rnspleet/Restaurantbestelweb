@@ -1246,7 +1246,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   border-radius:var(--radius);
   margin:10px 0;
 }
-.qr-vak canvas{ display:block; }
+.qr-vak img{ display:block; border-radius:2px; }
 .qr-link-tonen{ display:flex; gap:8px; align-items:center; }
 .qr-link-tonen input{
   flex:1;
