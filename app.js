@@ -118,6 +118,20 @@ const LETTERTYPE_OPTIES = [
   { key:"pacifico",     naam:"Pacifico",     ui:'"Pacifico", cursive',             css:'"Pacifico", cursive' },
   { key:"caveat",       naam:"Caveat",       ui:'"Caveat", cursive',               css:'"Caveat", cursive' },
 ];
+// Meldingsgeluiden die gekozen kunnen worden voor een nieuwe bestelling in de Keuken.
+// "geen" (geen bestand) en "eigen" (zelf geüpload, zie thema.geluidEigenData) worden apart afgehandeld.
+const GELUID_OPTIES = [
+  { key:"klassiek",  naam:"Klassieke melding",              bestand:"geluiden/klassiek.mp3" },
+  { key:"netflix",   naam:"Netflix-beat",                   bestand:"geluiden/netflix-beat.mp3" },
+  { key:"jennifer",  naam:"Jennifer eet matrassen 😂",       bestand:"geluiden/jennifer-matrassen.mp3" },
+  { key:"hema",      naam:"HEMA (luid af)",                 bestand:"geluiden/hema-loud.mp3" },
+  { key:"fears",     naam:"Fears to Fathom",                bestand:"geluiden/fears-to-fathom.mp3" },
+  { key:"gutgenug",  naam:"Du bist gut genug",               bestand:"geluiden/gut-genug.mp3" },
+  { key:"dino",      naam:"Dino RAWR 🦖",                    bestand:"geluiden/dino-rawr.mp3" },
+  { key:"anime",     naam:"Anime WOW 😲",                    bestand:"geluiden/anime-wow.mp3" },
+  { key:"cena",      naam:"...and his name is John Cena! 🎺",bestand:"geluiden/john-cena.mp3" },
+];
+const GELUID_MAX_BYTES = 400 * 1024; // eigen upload — grotere bestanden worden zwaar voor de database
 
 // ---------- helpers ----------
 // Slaat (of werkt bij) een restaurant op in de lijst "mijn restaurants" van dit apparaat.
@@ -184,6 +198,64 @@ function themaWijzigen(veld, waarde){
 function themaPresetKiezen(achtergrond, tekst){
   db.ref("restaurants/" + state.restaurantCode + "/thema").update({ achtergrond, tekst });
 }
+// Speelt een geluidsbestand (of data-URI van een eigen upload) gewoon meteen af, voor
+// zowel de voorbeeld-knop bij het kiezen als de echte melding bij een nieuwe bestelling.
+function geluidAfspelen(url){
+  if(!url) return;
+  try {
+    const audio = new Audio(url);
+    audio.play().catch(() => {});
+  } catch(e) {}
+}
+function themaGeluidKiezen(key){
+  themaWijzigen("geluid", key);
+}
+// Leest een door de gebruiker gekozen bestand in en slaat 'm als data-URI op in het thema
+// van dit restaurant (er is geen Firebase Storage nodig, dit gaat gewoon via de database net
+// als de rest van het thema) — geldt daardoor automatisch voor alle apparaten van dit restaurant.
+function themaEigenGeluidUploaden(file){
+  if(!file) return;
+  if(!file.type.startsWith("audio/")){
+    toonToast("Kies een geluidsbestand (mp3, wav, ogg, ...)");
+    return;
+  }
+  if(file.size > GELUID_MAX_BYTES){
+    toonToast("Bestand te groot — kies een geluidje onder de " + Math.round(GELUID_MAX_BYTES/1024) + " KB");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    db.ref("restaurants/" + state.restaurantCode + "/thema").update({
+      geluid: "eigen",
+      geluidEigenData: reader.result,
+      geluidEigenNaam: file.name,
+    }).then(() => toonToast("Eigen geluid geüpload"));
+  };
+  reader.onerror = () => toonToast("Kon het bestand niet lezen");
+  reader.readAsDataURL(file);
+}
+function themaEigenGeluidVerwijderen(){
+  db.ref("restaurants/" + state.restaurantCode + "/thema").update({
+    geluid: "klassiek",
+    geluidEigenData: null,
+    geluidEigenNaam: null,
+  });
+}
+// Bepaalt welk geluid nu actief staat voor dit restaurant en speelt het af — gebeurt alleen
+// voor teamleden met het "Keuken"-recht (of de eigenaar/beheerder), zodat gasten via de
+// zelfbestel-pagina er niets van merken.
+function speelMeldingsGeluidAf(){
+  if(!heeftRecht("keuken")) return;
+  const thema = state.thema || {};
+  const key = thema.geluid || "klassiek";
+  if(key === "geen") return;
+  if(key === "eigen"){
+    if(thema.geluidEigenData) geluidAfspelen(thema.geluidEigenData);
+    return;
+  }
+  const optie = GELUID_OPTIES.find(g => g.key === key);
+  if(optie) geluidAfspelen(optie.bestand);
+}
 // Sluit de live-verbindingen met het huidige restaurant af en gaat terug naar het startscherm.
 // Dit is GEEN "restaurant verlaten" — het restaurant blijft gewoon in je lijst "mijn restaurants"
 // staan, dit is puur even wisselen. Verwijderen uit die lijst gebeurt alleen automatisch
@@ -209,6 +281,7 @@ function verlaatHuidigRestaurant(){
   state.thema = null;
   state.plattegrond = {};
   state.categorieen = {};
+  bekendeBestellingIds = null;
   toepassenThema(null);
   state.actiefInRestaurant = false;
   state.landingScherm = "start";
@@ -336,9 +409,26 @@ function restaurantJoinen(codeInvoer, eigenNaam){
     }
   });
 }
+// Onthoudt welke bestelling-ids al bekend waren, om te kunnen zien of er een nieuwe is
+// bijgekomen (en dus het meldingsgeluid moet spelen). null = nog niet geïnitialiseerd voor
+// deze sessie/dit restaurant, zodat er nooit geluid afgaat bij het simpelweg binnenkomen.
+let bekendeBestellingIds = null;
+function verwerkBestellingenSnapshot(snap){
+  const nieuweData = snap.val() || {};
+  if(bekendeBestellingIds !== null){
+    const erIsEenNieuwe = Object.keys(nieuweData).some(id =>
+      !bekendeBestellingIds.has(id) && nieuweData[id].status === "nieuw"
+    );
+    if(erIsEenNieuwe) speelMeldingsGeluidAf();
+  }
+  bekendeBestellingIds = new Set(Object.keys(nieuweData));
+  state.bestellingen = nieuweData;
+  render();
+}
 function startRestaurant(){
   state.foutmelding = "";
   state.actiefInRestaurant = true;
+  bekendeBestellingIds = null;
   const code = state.restaurantCode;
   db.ref("restaurants/" + code + "/naam").on("value", snap => {
     if(snap.exists()){
@@ -358,10 +448,7 @@ function startRestaurant(){
     state.menu = snap.val() || {};
     render();
   });
-  db.ref("restaurants/" + code + "/bestellingen").on("value", snap => {
-    state.bestellingen = snap.val() || {};
-    render();
-  });
+  db.ref("restaurants/" + code + "/bestellingen").on("value", verwerkBestellingenSnapshot);
   db.ref("restaurants/" + code + "/historie").on("value", snap => {
     state.historie = snap.val() || {};
     render();
@@ -605,8 +692,9 @@ function beheerRestaurantBezoeken(code){
   state.thema = null;
   state.plattegrond = {};
   state.categorieen = {};
+  bekendeBestellingIds = null;
   db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
-  db.ref("restaurants/" + code + "/bestellingen").on("value", snap => { state.bestellingen = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/bestellingen").on("value", verwerkBestellingenSnapshot);
   db.ref("restaurants/" + code + "/historie").on("value", snap => { state.historie = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/leden").on("value", snap => { state.leden = snap.val() || {}; state.ledenGeladen = true; render(); });
   db.ref("restaurants/" + code + "/thema").on("value", snap => { state.thema = snap.val() || null; toepassenThema(state.thema); render(); });
@@ -638,6 +726,7 @@ function beheerRestaurantVerlaten(doorRender){
   state.thema = null;
   state.plattegrond = {};
   state.categorieen = {};
+  bekendeBestellingIds = null;
   state.actiefInRestaurant = false;
   state.winkelwagen = {};
   if(doorRender !== false) render();
@@ -1498,6 +1587,24 @@ function renderInstellingenAchtergrond(){
   const lettertypeHtml = LETTERTYPE_OPTIES.map(f => `
     <button type="button" class="lettertype-swatch ${huidigLettertype===f.key?'actief':''}" style="font-family:${f.ui};" data-action="thema-lettertype" data-lettertype="${f.key}">${f.naam}</button>`).join("");
 
+  const huidigGeluid = huidig.geluid || "klassiek";
+  const geluidGeenHtml = `
+    <div class="geluid-optie ${huidigGeluid==='geen'?'actief':''}">
+      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="geen">🔇 Geen geluid</button>
+    </div>`;
+  const geluidOptiesHtml = GELUID_OPTIES.map(g => `
+    <div class="geluid-optie ${huidigGeluid===g.key?'actief':''}">
+      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="${g.key}">${g.naam}</button>
+      <button type="button" class="geluid-optie__preview" data-action="geluid-preview" data-bestand="${g.bestand}" title="Beluister">▶</button>
+    </div>`).join("");
+  const eigenGeluidActief = huidigGeluid === "eigen";
+  const eigenGeluidHtml = huidig.geluidEigenData ? `
+    <div class="geluid-optie ${eigenGeluidActief?'actief':''}">
+      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="eigen">🎵 ${huidig.geluidEigenNaam || "Eigen geluid"}</button>
+      <button type="button" class="geluid-optie__preview" data-action="geluid-eigen-preview" title="Beluister">▶</button>
+      <button type="button" class="geluid-optie__verwijder" data-action="geluid-eigen-verwijderen" title="Verwijderen">🗑️</button>
+    </div>` : "";
+
   return `
     <div class="instel-blok">
       <div class="instel-blok__titel">Achtergrond</div>
@@ -1532,6 +1639,21 @@ function renderInstellingenAchtergrond(){
       <div class="instel-blok__titel">Lettertype</div>
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Verander het lettertype van de hele app.</p>
       <div class="lettertype-rij">${lettertypeHtml}</div>
+    </div>
+
+    <div class="instel-blok">
+      <div class="instel-blok__titel">🔊 Meldinggeluid bij nieuwe bestelling</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Speelt af in de Keuken zodra er een nieuwe bestelling binnenkomt (alleen bij teamleden met het Keuken-recht). Klik ▶ om 'm eerst te beluisteren.</p>
+      <div class="geluid-rij">
+        ${geluidGeenHtml}
+        ${geluidOptiesHtml}
+        ${eigenGeluidHtml}
+      </div>
+      <div class="geluid-upload">
+        <label for="geluid-upload-invoer" class="btn btn--ghost btn--sm">⬆️ Eigen geluid uploaden</label>
+        <input type="file" id="geluid-upload-invoer" accept="audio/*" data-action="geluid-upload" style="display:none;">
+        <span style="color:var(--text-dim); font-size:.72rem;">Max ${Math.round(GELUID_MAX_BYTES/1024)} KB, geldt voor alle apparaten van dit restaurant.</span>
+      </div>
     </div>`;
 }
 
@@ -1659,6 +1781,10 @@ root.addEventListener("click", e => {
       break;
     case "thema-patroon": themaWijzigen("patroon", el.dataset.patroon); break;
     case "thema-lettertype": themaWijzigen("lettertype", el.dataset.lettertype); break;
+    case "thema-geluid": themaGeluidKiezen(el.dataset.geluid); break;
+    case "geluid-preview": geluidAfspelen(el.dataset.bestand); break;
+    case "geluid-eigen-preview": geluidAfspelen((state.thema||{}).geluidEigenData); break;
+    case "geluid-eigen-verwijderen": themaEigenGeluidVerwijderen(); break;
     case "plattegrond-tool": state.plattegrondTool = el.dataset.tool; render(); break;
     case "plattegrond-cel": plattegrondCelKlikken(el.dataset.cel); break;
 
@@ -1727,6 +1853,7 @@ root.addEventListener("change", e => {
   if(action === "voorraad-toggle") menuItemUitverkochtWijzigen(id, el.checked);
   if(action === "wagen-ijs") wagenIjsWijzigen(id, el.checked);
   if(action === "wagen-slagroom") wagenSlagroomWijzigen(id, el.checked);
+  if(action === "geluid-upload"){ themaEigenGeluidUploaden(el.files[0]); el.value = ""; }
 });
 
 // ============================================================
