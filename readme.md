@@ -11,7 +11,7 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 - **Voorraad**: een eigen tabblad naast Historie, waar je elk product op **uitverkocht** kunt zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
 - **Systeemupdates op het startscherm**: nieuwe updates (geplaatst via Sitebeheer) verschijnen als teaser op het startscherm, met per update een knop **"Gelezen ✕"**. Klik je die aan, dan verdwijnt die update voor jou van het startscherm (dit wordt lokaal per apparaat onthouden) — in Sitebeheer zelf blijft de update gewoon volledig zichtbaar, voor iedereen.
 - **Instellingen**: onderverdeeld in vier tabbladen:
-  - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), restaurant verlaten.
+  - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), een QR-code voor zelfbestellen printen, restaurant verlaten.
   - **Producten**: eerst maak je hier **categorieën** aan (bijv. "Dranken", "Fastfood"); die kies je daarna bij het toevoegen van een product uit een keuzelijst, in plaats van steeds opnieuw te typen. Zo krijgt elk product altijd een bestaande, consistente categorie. Bij Bestellen staan de producten van elke categorie automatisch in een rijtje bij elkaar, onder de naam van die categorie. Verder beheer je hier het menu (producten toevoegen/verwijderen met emoji en prijs), en geef je per product aan of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
   - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas) en een lettertype voor de hele app. Geldt voor alle apparaten van dit restaurant.
   - **Plattegrond**: een rooster waarop je tafels, stoelen en banken kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen. Een stoel kun je draaien: klik 'm nogmaals aan met het Stoel-gereedschap om 'm 90° te roteren (gebruik Wissen om 'm te verwijderen). Een bank kies je liggend of staand en met een zelf in te stellen grootte (2 t/m 6 plekken); klik daarna op het vakje waar de bank moet beginnen.
@@ -19,6 +19,25 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
   Producten, Achtergrond en Plattegrond (in Instellingen) zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht; hetzelfde recht bepaalt ook of het losse Voorraad-tabblad zichtbaar is (zie Team & rechten hieronder).
 
 ### Team & rechten
+
+### Zelfbestellen via QR-code
+
+In Instellingen → Algemeen staat per restaurant een QR-code, met eronder de bijbehorende link en een knop **"Printen als PDF"** (opent het printvenster van de browser — daar kies je "Opslaan als PDF" of print je 'm direct op een echte printer).
+
+De QR-code wijst naar `bestellen.html?code=<restaurantcode>` — een losse, lichte pagina (los van het teamgedeelte) waar een gast:
+1. eerst zijn **eigen tafel kiest** op de plattegrond (heeft het restaurant geen plattegrond ingesteld, dan slaat dit scherm automatisch over);
+2. daarna het **menu** ziet en zelf bestelt — dit werkt zonder inloggen, precies zoals een teamlid dat voor iemand zou invoeren, en komt op dezelfde manier bij **Keuken** binnen;
+3. zijn **eigen bestellingen** live ziet, met status. Deze labels zijn zo afgesproken met de eigenaar (bewust niet de "voor de hand liggende" volgorde):
+
+   | Status intern (app.js) | Wat de gast ziet |
+   |---|---|
+   | `nieuw` (net binnen bij Keuken) | **Afgeleverd** |
+   | `bereiden` | **In bereiding** |
+   | `klaar` (staat klaar om gebracht te worden) | **Onderweg** |
+
+   Zodra een teamlid de bestelling op **Bezorgd** zet, verhuist 'ie naar de historie en verdwijnt 'ie van het overzicht van de gast.
+
+Elk apparaat/browser dat via de QR-code bestelt, krijgt automatisch een eigen willekeurig gast-id (opgeslagen in `localStorage`, net als bij de rest van de app) — zo ziet een gast alleen zíjn eigen bestellingen terug, ook als er tegelijk tientallen andere gasten aan het bestellen zijn.
 
 Wie een restaurant **maakt**, wordt automatisch **eigenaar** en krijgt alle rechten.
 Iedereen die daarna via de code **joint**, verschijnt in Instellingen onder **Team & rechten**
@@ -86,7 +105,10 @@ Ga naar **Realtime Database → Regels** en zet:
       ".write": "auth != null",
       "$code": {
         ".read": true,
-        ".write": true
+        ".write": true,
+        "bestellingen": {
+          ".indexOn": ["gastId"]
+        }
       }
     },
     "site_updates": {
@@ -132,6 +154,7 @@ Daarna:
 | `style.css` | Het "keukenbon"-ontwerp: donker staal + vlam-oranje + bestelbonnetjes |
 | `app.js` | Alle logica: schermen, winkelwagen, Firebase-synchronisatie |
 | `firebase-config.js` | Hier vul je je eigen Firebase-gegevens in |
+| `bestellen.html` / `bestellen.js` | De zelfbestel-pagina voor gasten (QR-code) |
 
 ## Hoe de data eruitziet in Firebase
 
