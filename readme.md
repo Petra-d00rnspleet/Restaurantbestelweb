@@ -18,18 +18,18 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
 ### Meldinggeluid bij nieuwe bestelling
 
-In Instellingen → Achtergrond kies je een geluid dat afspeelt zodra er een nieuwe bestelling
-binnenkomt — alleen op apparaten van teamleden met het **Keuken**-recht (gasten via de
-zelfbestel-pagina horen nooit iets). Er staat een setje kant-en-klare geluiden klaar
-(`geluiden/*.mp3` in dit project) die je met ▶ eerst kunt beluisteren, plus **"🔇 Geen geluid"**
-om het uit te zetten.
+In Instellingen → Achtergrond kan de eigenaar (of teamlid met Instellingen-recht) een eigen
+geluidsbestand uploaden dat afspeelt zodra er een nieuwe bestelling binnenkomt — alleen op
+apparaten van teamleden met het **Keuken**-recht (gasten via de zelfbestel-pagina horen nooit
+iets). Standaard staat dit op **"🔇 Geen geluid"**.
 
-Daarnaast kun je via **"⬆️ Eigen geluid uploaden"** zelf een geluidsbestand kiezen (max
-400 KB). Dat bestand wordt — net als de rest van het thema — rechtstreeks in de Realtime
-Database opgeslagen (er is geen Firebase Storage voor nodig) en geldt daarmee automatisch voor
-alle apparaten van dit restaurant. Houd het bestand klein: een geluidsbestand als platte tekst
-opslaan is minder efficiënt dan een los bestand, dus grote bestanden (muziek van een paar
-minuten) zijn hier niet geschikt — een kort piepje of jingle van een paar seconden wel.
+Via **"⬆️ Eigen geluid uploaden"** kies je een geluidsbestand (max 400 KB). Dat bestand wordt
+— net als de rest van het thema — rechtstreeks in de Realtime Database opgeslagen (er is geen
+Firebase Storage voor nodig) en geldt daarmee automatisch voor alle apparaten van dit
+restaurant. Houd het bestand klein: een geluidsbestand als platte tekst opslaan is minder
+efficiënt dan een los bestand, dus grote bestanden (muziek van een paar minuten) zijn hier niet
+geschikt — een kort piepje of jingle van een paar seconden wel. Met 🗑️ verwijder je het weer
+(dan gaat het terug naar "Geen geluid").
 
   Producten, Achtergrond en Plattegrond (in Instellingen) zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht; hetzelfde recht bepaalt ook of het losse Voorraad-tabblad zichtbaar is (zie Team & rechten hieronder).
 
@@ -170,7 +170,6 @@ Daarna:
 | `app.js` | Alle logica: schermen, winkelwagen, Firebase-synchronisatie |
 | `firebase-config.js` | Hier vul je je eigen Firebase-gegevens in |
 | `bestellen.html` / `bestellen.js` | De zelfbestel-pagina voor gasten (QR-code) |
-| `geluiden/*.mp3` | Kant-en-klare meldingsgeluiden om uit te kiezen bij Instellingen → Achtergrond |
 
 ## Hoe de data eruitziet in Firebase
 
@@ -194,7 +193,7 @@ restaurants/
       tekst: "#f3ead9"
       patroon: "vlam"        ← optioneel, zie PATROON_OPTIES in app.js
       lettertype: "poppins"  ← optioneel, zie LETTERTYPE_OPTIES in app.js
-      geluid: "klassiek"     ← optioneel, "geen" | "eigen" | zie GELUID_OPTIES in app.js (standaard: "klassiek")
+      geluid: "eigen"         ← optioneel, "geen" (standaard) of "eigen" — zie thema.geluidEigenData hieronder
       geluidEigenData: "data:audio/mpeg;base64,..."  ← alleen aanwezig bij een eigen upload
       geluidEigenNaam: "meldingxyz.mp3"              ← alleen aanwezig bij een eigen upload
     plattegrond/
