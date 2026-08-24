@@ -118,19 +118,8 @@ const LETTERTYPE_OPTIES = [
   { key:"pacifico",     naam:"Pacifico",     ui:'"Pacifico", cursive',             css:'"Pacifico", cursive' },
   { key:"caveat",       naam:"Caveat",       ui:'"Caveat", cursive',               css:'"Caveat", cursive' },
 ];
-// Meldingsgeluiden die gekozen kunnen worden voor een nieuwe bestelling in de Keuken.
-// "geen" (geen bestand) en "eigen" (zelf geüpload, zie thema.geluidEigenData) worden apart afgehandeld.
-const GELUID_OPTIES = [
-  { key:"klassiek",  naam:"Klassieke melding",              bestand:"geluiden/klassiek.mp3" },
-  { key:"netflix",   naam:"Netflix-beat",                   bestand:"geluiden/netflix-beat.mp3" },
-  { key:"jennifer",  naam:"Jennifer eet matrassen 😂",       bestand:"geluiden/jennifer-matrassen.mp3" },
-  { key:"hema",      naam:"HEMA (luid af)",                 bestand:"geluiden/hema-loud.mp3" },
-  { key:"fears",     naam:"Fears to Fathom",                bestand:"geluiden/fears-to-fathom.mp3" },
-  { key:"gutgenug",  naam:"Du bist gut genug",               bestand:"geluiden/gut-genug.mp3" },
-  { key:"dino",      naam:"Dino RAWR 🦖",                    bestand:"geluiden/dino-rawr.mp3" },
-  { key:"anime",     naam:"Anime WOW 😲",                    bestand:"geluiden/anime-wow.mp3" },
-  { key:"cena",      naam:"...and his name is John Cena! 🎺",bestand:"geluiden/john-cena.mp3" },
-];
+// Meldinggeluid bij een nieuwe bestelling: alleen "geen" (uit) of "eigen" (zelf geüpload,
+// zie thema.geluidEigenData) — er zit geen kant-en-klare lijst met geluiden meer in.
 const GELUID_MAX_BYTES = 400 * 1024; // eigen upload — grotere bestanden worden zwaar voor de database
 
 // ---------- helpers ----------
@@ -236,7 +225,7 @@ function themaEigenGeluidUploaden(file){
 }
 function themaEigenGeluidVerwijderen(){
   db.ref("restaurants/" + state.restaurantCode + "/thema").update({
-    geluid: "klassiek",
+    geluid: "geen",
     geluidEigenData: null,
     geluidEigenNaam: null,
   });
@@ -247,14 +236,9 @@ function themaEigenGeluidVerwijderen(){
 function speelMeldingsGeluidAf(){
   if(!heeftRecht("keuken")) return;
   const thema = state.thema || {};
-  const key = thema.geluid || "klassiek";
-  if(key === "geen") return;
-  if(key === "eigen"){
-    if(thema.geluidEigenData) geluidAfspelen(thema.geluidEigenData);
-    return;
+  if(thema.geluid === "eigen" && thema.geluidEigenData){
+    geluidAfspelen(thema.geluidEigenData);
   }
-  const optie = GELUID_OPTIES.find(g => g.key === key);
-  if(optie) geluidAfspelen(optie.bestand);
 }
 // Sluit de live-verbindingen met het huidige restaurant af en gaat terug naar het startscherm.
 // Dit is GEEN "restaurant verlaten" — het restaurant blijft gewoon in je lijst "mijn restaurants"
@@ -1587,16 +1571,11 @@ function renderInstellingenAchtergrond(){
   const lettertypeHtml = LETTERTYPE_OPTIES.map(f => `
     <button type="button" class="lettertype-swatch ${huidigLettertype===f.key?'actief':''}" style="font-family:${f.ui};" data-action="thema-lettertype" data-lettertype="${f.key}">${f.naam}</button>`).join("");
 
-  const huidigGeluid = huidig.geluid || "klassiek";
+  const huidigGeluid = huidig.geluid || "geen";
   const geluidGeenHtml = `
-    <div class="geluid-optie ${huidigGeluid==='geen'?'actief':''}">
+    <div class="geluid-optie ${huidigGeluid==='geen' || huidigGeluid==='klassiek' ? 'actief':''}">
       <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="geen">🔇 Geen geluid</button>
     </div>`;
-  const geluidOptiesHtml = GELUID_OPTIES.map(g => `
-    <div class="geluid-optie ${huidigGeluid===g.key?'actief':''}">
-      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="${g.key}">${g.naam}</button>
-      <button type="button" class="geluid-optie__preview" data-action="geluid-preview" data-bestand="${g.bestand}" title="Beluister">▶</button>
-    </div>`).join("");
   const eigenGeluidActief = huidigGeluid === "eigen";
   const eigenGeluidHtml = huidig.geluidEigenData ? `
     <div class="geluid-optie ${eigenGeluidActief?'actief':''}">
@@ -1643,10 +1622,9 @@ function renderInstellingenAchtergrond(){
 
     <div class="instel-blok">
       <div class="instel-blok__titel">🔊 Meldinggeluid bij nieuwe bestelling</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Speelt af in de Keuken zodra er een nieuwe bestelling binnenkomt (alleen bij teamleden met het Keuken-recht). Klik ▶ om 'm eerst te beluisteren.</p>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Speelt af in de Keuken zodra er een nieuwe bestelling binnenkomt (alleen bij teamleden met het Keuken-recht). Upload hieronder je eigen geluidsbestand, of zet het uit.</p>
       <div class="geluid-rij">
         ${geluidGeenHtml}
-        ${geluidOptiesHtml}
         ${eigenGeluidHtml}
       </div>
       <div class="geluid-upload">
@@ -1782,7 +1760,6 @@ root.addEventListener("click", e => {
     case "thema-patroon": themaWijzigen("patroon", el.dataset.patroon); break;
     case "thema-lettertype": themaWijzigen("lettertype", el.dataset.lettertype); break;
     case "thema-geluid": themaGeluidKiezen(el.dataset.geluid); break;
-    case "geluid-preview": geluidAfspelen(el.dataset.bestand); break;
     case "geluid-eigen-preview": geluidAfspelen((state.thema||{}).geluidEigenData); break;
     case "geluid-eigen-verwijderen": themaEigenGeluidVerwijderen(); break;
     case "plattegrond-tool": state.plattegrondTool = el.dataset.tool; render(); break;
