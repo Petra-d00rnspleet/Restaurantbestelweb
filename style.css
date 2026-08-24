@@ -1045,6 +1045,33 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .lettertype-swatch:hover{ transform:translateY(-2px); }
 .lettertype-swatch.actief{ border-color:var(--flame); }
 
+.geluid-rij{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.geluid-optie{
+  display:flex; align-items:stretch;
+  background:var(--bg-2);
+  border:2px solid var(--line);
+  border-radius:var(--radius);
+  overflow:hidden;
+  transition:border-color .12s ease;
+}
+.geluid-optie.actief{ border-color:var(--flame); }
+.geluid-optie__kies{
+  padding:10px 14px;
+  color:var(--text);
+  font-family:var(--ui);
+  font-size:.8rem;
+  white-space:nowrap;
+}
+.geluid-optie__preview, .geluid-optie__verwijder{
+  padding:10px 12px;
+  border-left:1px solid var(--line);
+  color:var(--text-dim);
+  font-size:.8rem;
+}
+.geluid-optie__preview:hover{ color:var(--flame); }
+.geluid-optie__verwijder:hover{ color:var(--ember); }
+.geluid-upload{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+
 /* ============================================================
    PLATTEGROND
    ============================================================ */
