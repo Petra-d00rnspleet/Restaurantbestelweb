@@ -3,11 +3,11 @@
 // Stappen om deze te vinden staan in README.md.
 // ============================================================
 const firebaseConfig = {
-  apiKey: "AIzaSyCKSu7jHB6WmXpC2s3e-fmYqHUl2hGETfE",
-  authDomain: "sara-4dc17.firebaseapp.com",
-  databaseURL: "https://sara-4dc17-default-rtdb.europe-west1.firebasedatabase.app/",
-  projectId: "sara-4dc17",
-  storageBucket: "sara-4dc17.firebasestorage.app",
-  messagingSenderId: "854913873540",
-  appId: "1:854913873540:web:873fb076dde7aee281f4d1"
+  apiKey: "AIzaSyAOHfx38BSVcJM-Szk-9D0PSVZK13VxvIo",
+  authDomain: "bestelweb-d15d1.firebaseapp.com",
+  databaseURL: "https://bestelweb-d15d1-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "bestelweb-d15d1",
+  storageBucket: "bestelweb-d15d1.firebasestorage.app",
+  messagingSenderId: "332712251909",
+  appId: "1:332712251909:web:3c0d07691e90075278826c"
 };
