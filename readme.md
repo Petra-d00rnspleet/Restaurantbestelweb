@@ -13,8 +13,23 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 - **Instellingen**: onderverdeeld in vier tabbladen:
   - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), een QR-code voor zelfbestellen printen, restaurant verlaten.
   - **Producten**: eerst maak je hier **categorieën** aan (bijv. "Dranken", "Fastfood"); die kies je daarna bij het toevoegen van een product uit een keuzelijst, in plaats van steeds opnieuw te typen. Zo krijgt elk product altijd een bestaande, consistente categorie. Bij Bestellen staan de producten van elke categorie automatisch in een rijtje bij elkaar, onder de naam van die categorie. Verder beheer je hier het menu (producten toevoegen/verwijderen met emoji en prijs), en geef je per product aan of gasten een **ijskeuze** (ijsklontjes, gewoon ja/nee bij het bestellen) en/of **slagroomkeuze** krijgen.
-  - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas) en een lettertype voor de hele app. Geldt voor alle apparaten van dit restaurant.
+  - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas), een lettertype en een **meldinggeluid** voor de hele app. Geldt voor alle apparaten van dit restaurant.
   - **Plattegrond**: een rooster waarop je tafels, stoelen en banken kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen. Een stoel kun je draaien: klik 'm nogmaals aan met het Stoel-gereedschap om 'm 90° te roteren (gebruik Wissen om 'm te verwijderen). Een bank kies je liggend of staand en met een zelf in te stellen grootte (2 t/m 6 plekken); klik daarna op het vakje waar de bank moet beginnen.
+
+### Meldinggeluid bij nieuwe bestelling
+
+In Instellingen → Achtergrond kies je een geluid dat afspeelt zodra er een nieuwe bestelling
+binnenkomt — alleen op apparaten van teamleden met het **Keuken**-recht (gasten via de
+zelfbestel-pagina horen nooit iets). Er staat een setje kant-en-klare geluiden klaar
+(`geluiden/*.mp3` in dit project) die je met ▶ eerst kunt beluisteren, plus **"🔇 Geen geluid"**
+om het uit te zetten.
+
+Daarnaast kun je via **"⬆️ Eigen geluid uploaden"** zelf een geluidsbestand kiezen (max
+400 KB). Dat bestand wordt — net als de rest van het thema — rechtstreeks in de Realtime
+Database opgeslagen (er is geen Firebase Storage voor nodig) en geldt daarmee automatisch voor
+alle apparaten van dit restaurant. Houd het bestand klein: een geluidsbestand als platte tekst
+opslaan is minder efficiënt dan een los bestand, dus grote bestanden (muziek van een paar
+minuten) zijn hier niet geschikt — een kort piepje of jingle van een paar seconden wel.
 
   Producten, Achtergrond en Plattegrond (in Instellingen) zijn alleen zichtbaar voor teamleden met het "Instellingen"-recht; hetzelfde recht bepaalt ook of het losse Voorraad-tabblad zichtbaar is (zie Team & rechten hieronder).
 
@@ -155,6 +170,7 @@ Daarna:
 | `app.js` | Alle logica: schermen, winkelwagen, Firebase-synchronisatie |
 | `firebase-config.js` | Hier vul je je eigen Firebase-gegevens in |
 | `bestellen.html` / `bestellen.js` | De zelfbestel-pagina voor gasten (QR-code) |
+| `geluiden/*.mp3` | Kant-en-klare meldingsgeluiden om uit te kiezen bij Instellingen → Achtergrond |
 
 ## Hoe de data eruitziet in Firebase
 
@@ -178,6 +194,9 @@ restaurants/
       tekst: "#f3ead9"
       patroon: "vlam"        ← optioneel, zie PATROON_OPTIES in app.js
       lettertype: "poppins"  ← optioneel, zie LETTERTYPE_OPTIES in app.js
+      geluid: "klassiek"     ← optioneel, "geen" | "eigen" | zie GELUID_OPTIES in app.js (standaard: "klassiek")
+      geluidEigenData: "data:audio/mpeg;base64,..."  ← alleen aanwezig bij een eigen upload
+      geluidEigenNaam: "meldingxyz.mp3"              ← alleen aanwezig bij een eigen upload
     plattegrond/
       "2-5": { type: "tafel", nummer: 1, bezet: false }
       "2-6": { type: "stoel", richting: "boven" }   ← richting: boven|rechts|onder|links (rotatie)
@@ -198,6 +217,5 @@ Zodra de status van een bestelling wijzigt (via de Keuken- of Bezorgen-pagina), 
 ## Uitbreidingsideeën
 
 - Inloggen per medewerker (Firebase Authentication)
-- Geluid/notificatie bij een nieuwe bestelling in de keuken
 - Geschiedenis van bezorgde bestellingen bewaren i.p.v. verwijderen
 - Prijzen per bestelling optellen tot een dagtotaal in Instellingen
