@@ -78,7 +78,7 @@ const MERKNAAM = "Restaurants";
 const MAX_RESTAURANTS_PER_PERSOON = 2;
 
 // Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
-const BEHEERDER_WACHTWOORD = "1234567890ENNUOPFLIKKERENLARS!";
+const BEHEERDER_WACHTWOORD = "Wacht12WC34Sanipi56Achtergrond78Dood90";
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
