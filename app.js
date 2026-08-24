@@ -243,6 +243,12 @@ function toonToast(tekst){
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 1800);
 }
+// Bouwt de link naar de zelfbestel-pagina voor een restaurant — werkt automatisch op elke
+// plek waar de site gehost staat (GitHub Pages, eigen domein, lokaal), omdat 'ie uitgaat van
+// de locatie van dit bestand zelf.
+function zelfBestelUrl(code){
+  return location.origin + location.pathname.replace(/index\.html$/, "") + "bestellen.html?code=" + code;
+}
 
 // ---------- firebase acties ----------
 function restaurantMaken(naam, eigenNaam){
@@ -700,6 +706,41 @@ function itemExtraHtml(it){
   return delen.length ? `<span class="ticket__item-notitie">— ${delen.join(" · ")}</span>` : "";
 }
 
+// ---------- zelfbestellen: QR-code + printen ----------
+// Tekent de QR-code (naar bestellen.html?code=...) in het canvas in de Algemeen-tab.
+// Wordt na elke render opnieuw aangeroepen zolang die tab open is, zie renderDashboard().
+function qrTekenen(){
+  const canvas = document.getElementById("qr-canvas-algemeen");
+  if(!canvas || typeof QRCode === "undefined") return;
+  QRCode.toCanvas(canvas, zelfBestelUrl(state.restaurantCode), { width: 220, margin: 1 }, err => {
+    if(err) console.error("QR-code tekenen mislukt:", err);
+  });
+}
+function qrLinkKopieren(){
+  navigator.clipboard?.writeText(zelfBestelUrl(state.restaurantCode));
+  toonToast("Link gekopieerd");
+}
+// Zet de QR-code (als afbeelding, dus los van React/DOM-herrenders) tijdelijk in een eigen
+// print-vak buiten #app, print 'm, en ruimt dat vak daarna weer op. Zo kan de gebruiker via
+// de "Opslaan als PDF"-optie van het printvenster de QR-code als PDF bewaren of direct printen.
+function qrPrinten(){
+  const canvas = document.getElementById("qr-canvas-algemeen");
+  if(!canvas) return;
+  const dataUrl = canvas.toDataURL("image/png");
+  const printVak = document.createElement("div");
+  printVak.id = "print-qr-vak";
+  printVak.innerHTML = `
+    <div class="print-qr__naam">${state.restaurantNaam}</div>
+    <img src="${dataUrl}" alt="QR-code om zelf te bestellen">
+    <div class="print-qr__uitleg">Scan om zelf te bestellen</div>
+    <div class="print-qr__code">Code: ${state.restaurantCode}</div>
+  `;
+  document.body.appendChild(printVak);
+  window.print();
+  const opruimen = () => { printVak.remove(); window.removeEventListener("afterprint", opruimen); };
+  window.addEventListener("afterprint", opruimen);
+}
+
 // ============================================================
 // RENDER
 // ============================================================
@@ -961,7 +1002,10 @@ function renderDashboard(){
   else if(state.huidigeView === "bezorgen") inhoud.innerHTML = renderBezorgen();
   else if(state.huidigeView === "historie") inhoud.innerHTML = renderHistorie();
   else if(state.huidigeView === "voorraad") inhoud.innerHTML = renderVoorraad();
-  else if(state.huidigeView === "instellingen") inhoud.innerHTML = renderInstellingen();
+  else if(state.huidigeView === "instellingen") {
+    inhoud.innerHTML = renderInstellingen();
+    if(state.instellingenTab === "algemeen") qrTekenen();
+  }
 }
 
 function renderBestellen(){
@@ -1309,6 +1353,17 @@ function renderInstellingenAlgemeen(){
     ${teamHtml}
 
     <div class="instel-blok">
+      <div class="instel-blok__titel">Zelfbestellen (QR-code)</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Gasten scannen deze code, kiezen hun eigen tafel en bestellen zelf — de bestelling komt gewoon bij Keuken binnen, precies zoals bij een bestelling die het team invoert.</p>
+      <div class="qr-vak"><canvas id="qr-canvas-algemeen"></canvas></div>
+      <div class="qr-link-tonen">
+        <input readonly value="${zelfBestelUrl(state.restaurantCode)}">
+        <button class="btn btn--ghost btn--sm" data-action="qr-link-kopieren">Link kopiëren</button>
+      </div>
+      <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
+    </div>
+
+    <div class="instel-blok">
       <div class="instel-blok__titel">Dit restaurant</div>
       ${state.beheerBezoekModus ? `
         <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je bekijkt dit restaurant als beheerder — dit apparaat is er geen lid van.</p>
@@ -1564,6 +1619,8 @@ root.addEventListener("click", e => {
     case "historie-wissen": historieWissen(); break;
 
     case "beheer-open": beheerPaneelOpenen(); break;
+    case "qr-printen": qrPrinten(); break;
+    case "qr-link-kopieren": qrLinkKopieren(); break;
     case "beheer-sluiten": beheerPaneelSluiten(); break;
     case "beheer-inloggen":
       beheerInloggen(
