@@ -6,6 +6,7 @@
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+const auth = firebase.auth();
 const root = document.getElementById("app");
 
 // ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
@@ -59,7 +60,7 @@ const state = {
   plattegrondTool: "tafel",
   siteUpdates: {},
   gelezenUpdates: laadGelezenUpdates(),   // ids van systeemupdates die je al als gelezen hebt gemarkeerd
-  beheerderActief: localStorage.getItem("ticket_beheerder") === "1",
+  beheerderActief: false,  // wordt gezet door Firebase Auth (zie onAuthStateChanged onderaan), niet meer lokaal opgeslagen
   beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
   beheerFoutmelding: "",
   alleRestaurants: {},          // alle restaurants in de database, alleen geladen als het beheerpaneel open is
@@ -76,9 +77,6 @@ const state = {
 
 const MERKNAAM = "Restaurants";
 const MAX_RESTAURANTS_PER_PERSOON = 2;
-
-// Wachtwoord om systeemupdates te mogen plaatsen — pas dit aan naar iets eigen!
-const BEHEERDER_WACHTWOORD = "Wacht12WC34Sanipi56Achtergrond78Dood90";
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
@@ -525,33 +523,35 @@ function plattegrondCelKlikken(cel){
   }
 }
 
-// ---------- sitebeheer (wachtwoord-vak voor de eigenaar van de website) ----------
-// Alleen degene met het beheerderswachtwoord (BEHEERDER_WACHTWOORD, bovenin dit bestand)
-// kan dit vak openen. Daar kun je alle restaurants zien/bezoeken/verwijderen en de
-// systeemupdates schrijven.
+// ---------- sitebeheer (Firebase Authentication — geen wachtwoord meer in de broncode) ----------
+// Alleen wie inlogt met een e-mail/wachtwoord-account dat JIJ aanmaakt in de Firebase-console
+// (Authentication → Sign-in method → E-mail/wachtwoord) kan dit vak openen. De controle gebeurt
+// bij Firebase zelf, niet in dit bestand — dus niet te vinden via "Weergave broncode".
+// De écht gevoelige actie (alle restaurants tegelijk opvragen) is bovendien met databaseregels
+// afgeschermd tot ingelogde gebruikers — zie de regels in readme.md.
 function beheerPaneelOpenen(){
   state.beheerPaneelOpen = true;
   state.beheerFoutmelding = "";
   if(state.beheerderActief) alleRestaurantsLuisteren();
   render();
 }
-function beheerWachtwoordControleren(invoer){
-  invoer = (invoer || "").trim();
-  if(!invoer){ state.beheerFoutmelding = "Vul het beheerderswachtwoord in."; render(); return; }
-  if(invoer === BEHEERDER_WACHTWOORD){
-    localStorage.setItem("ticket_beheerder", "1");
-    state.beheerderActief = true;
-    state.beheerFoutmelding = "";
-    alleRestaurantsLuisteren();
-    render();
-  } else {
-    state.beheerFoutmelding = "Onjuist wachtwoord.";
-    render();
-  }
+function beheerInloggen(email, wachtwoord){
+  email = (email || "").trim();
+  wachtwoord = wachtwoord || "";
+  if(!email || !wachtwoord){ state.beheerFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
+  state.beheerFoutmelding = "Bezig met inloggen…";
+  render();
+  auth.signInWithEmailAndPassword(email, wachtwoord)
+    .then(() => {
+      // state.beheerderActief wordt door onAuthStateChanged hieronder op true gezet, incl. render()
+    })
+    .catch(() => {
+      state.beheerFoutmelding = "Onjuiste inloggegevens.";
+      render();
+    });
 }
 function beheerderUitloggen(){
-  localStorage.removeItem("ticket_beheerder");
-  state.beheerderActief = false;
+  auth.signOut();
   db.ref("restaurants").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
@@ -824,14 +824,20 @@ function renderBeheerPaneel(){
           <div class="landing__divider"><span class="landing__diamond"></span></div>
         </div>
         <div class="form-card">
-          <label class="form-card__label">Beheerderswachtwoord</label>
-          <input id="beheer-wachtwoord" type="password" placeholder="••••••••" autofocus>
+          <label class="form-card__label">E-mailadres</label>
+          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" autofocus>
+          <label class="form-card__label">Wachtwoord</label>
+          <input id="beheer-wachtwoord" type="password" placeholder="••••••••">
           ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="beheer-inloggen">Inloggen</button>
           <button class="terug-link" data-action="beheer-sluiten">← Terug</button>
         </div>
       </div>`;
-    const verstuur = () => beheerWachtwoordControleren(document.getElementById("beheer-wachtwoord").value);
+    const verstuur = () => beheerInloggen(
+      document.getElementById("beheer-email").value,
+      document.getElementById("beheer-wachtwoord").value
+    );
+    document.getElementById("beheer-email").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     document.getElementById("beheer-wachtwoord").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     return;
   }
@@ -1560,7 +1566,10 @@ root.addEventListener("click", e => {
     case "beheer-open": beheerPaneelOpenen(); break;
     case "beheer-sluiten": beheerPaneelSluiten(); break;
     case "beheer-inloggen":
-      beheerWachtwoordControleren(document.getElementById("beheer-wachtwoord").value);
+      beheerInloggen(
+        document.getElementById("beheer-email").value,
+        document.getElementById("beheer-wachtwoord").value
+      );
       break;
     case "beheer-uitloggen": beheerderUitloggen(); break;
     case "beheer-bezoeken": beheerRestaurantBezoeken(id); break;
@@ -1665,6 +1674,14 @@ root.addEventListener("change", e => {
 // Systeemupdates zijn site-breed en dus altijd actief, ook als er nog geen restaurant gekozen is.
 db.ref("site_updates").on("value", snap => {
   state.siteUpdates = snap.val() || {};
+  render();
+});
+// Houdt de sitebeheer-status bij op basis van Firebase Authentication (server-side gecontroleerd,
+// niet meer via localStorage) — vuurt ook meteen bij het laden als je nog een geldige sessie hebt.
+auth.onAuthStateChanged(gebruiker => {
+  state.beheerderActief = !!gebruiker;
+  state.beheerFoutmelding = "";
+  if(gebruiker && state.beheerPaneelOpen) alleRestaurantsLuisteren();
   render();
 });
 render();
