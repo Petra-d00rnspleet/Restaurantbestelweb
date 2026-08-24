@@ -41,13 +41,15 @@ Onderaan het startscherm (en onderaan Instellingen, als je al in een restaurant 
 - Elk restaurant **volledig verwijderen** (inclusief menu, bestellingen en historie) — dit kan niet ongedaan gemaakt worden.
 - De **systeemupdates** schrijven en verwijderen (titel + tekst) — dit stond eerder in het Instellingen-tabblad van elk restaurant, maar staat nu alleen nog hier.
 
-Dit werkt met een simpel wachtwoord, ingesteld bovenin `app.js`:
+Dit werkt met een **echt account via Firebase Authentication** — er staat geen wachtwoord meer ergens in de broncode. Zo stel je dat in:
 
-```js
-const BEHEERDER_WACHTWOORD = "verander-dit-wachtwoord";
-```
+1. Ga in de Firebase-console naar **Build → Authentication** → **Get started**.
+2. Tab **Sign-in method** → zet **E-mail/wachtwoord** aan.
+3. Tab **Users** → **Add user** → vul jouw eigen e-mailadres en een sterk wachtwoord in. Dit is het account waarmee jij straks inlogt bij "⚙ Sitebeheer".
 
-Pas deze waarde aan naar iets alleen bij jou bekends vóórdat je de site publiceert. Let op: dit is een lichte, client-side beveiliging — prima voor een schoolproject of eigen gebruik, maar iemand die in de broncode kijkt kan het wachtwoord vinden, en de Firebase-databaseregels (zie hieronder) bepalen de échte toegang. Voor echte beveiliging is Firebase Authentication + strengere databaseregels nodig.
+Je kunt zoveel van deze accounts aanmaken als je wilt (bijv. voor jezelf en een collega) — verwijder een account in **Authentication → Users** om iemands toegang in te trekken.
+
+⚠️ Dit inlogscherm alleen is niet genoeg: zonder de databaseregels hieronder kan iemand die de Firebase-URL kent nog steeds rechtstreeks (buiten de site om) alle restaurantgegevens opvragen. De regels hieronder zorgen dat dát ook écht bij Firebase zelf wordt afgedwongen, niet alleen in de browser.
 
 Geen server nodig — dit is een pure HTML/CSS/JS site die op **GitHub Pages** kan draaien. Firebase Realtime Database regelt de live synchronisatie.
 
@@ -74,18 +76,33 @@ const firebaseConfig = {
 
 ### Databaseregels (testmodus verloopt na 30 dagen)
 
-Ga naar **Realtime Database → Regels** en zet (voor een schoolproject/demo):
+Ga naar **Realtime Database → Regels** en zet:
 
 ```json
 {
   "rules": {
-    ".read": true,
-    ".write": true
+    "restaurants": {
+      ".read": "auth != null",
+      ".write": "auth != null",
+      "$code": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "site_updates": {
+      ".read": true,
+      ".write": "auth != null"
+    }
   }
 }
 ```
 
-⚠️ Dit betekent dat iedereen met de URL kan lezen/schrijven — prima voor een demo of eigen gebruik, maar niet voor een productie-app met gevoelige data.
+Wat dit doet:
+- Gewone gasten/teamleden kunnen, zoals voorheen, gewoon bij één specifiek restaurant via de code (`restaurants/K3F7Q/...`) — dat blijft zonder inloggen werken, precies zoals de app dat gebruikt.
+- **Alle** restaurants tegelijk opvragen (`restaurants` zonder code — dat is wat het sitebeheer-paneel doet om de lijst te tonen) kan alleen nog met een geldige Firebase-inlogsessie (`auth != null`). Zonder in te loggen krijg je die lijst dus nergens meer te zien, ook niet door rechtstreeks met de database te praten.
+- Systeemupdates blijven voor iedereen leesbaar, maar alleen ingelogde beheerders kunnen ze plaatsen/verwijderen.
+
+⚠️ Let op: de restaurantcode (`$code`) zelf werkt nog steeds als een soort "wachtwoord" voor dat ene restaurant — wie de code weet of raadt, kan dat restaurant lezen/wijzigen. Dat is een bewuste, lichte keuze van dit project (net als bij een tafelbon-code) en geen verkeerde configuratie; alleen het **sitebeheer-gedeelte** (alle restaurants + systeemupdates) is nu met een echt account afgeschermd.
 
 ## 2. Lokaal uitproberen
 
