@@ -1234,3 +1234,59 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   animation:toast-in .2s ease;
 }
 @keyframes toast-in{ from{opacity:0; transform:translate(-50%,8px);} to{opacity:1; transform:translate(-50%,0);} }
+
+/* ============================================================
+   ZELFBESTELLEN — QR-code (Instellingen) + print + gast-tracker
+   ============================================================ */
+.qr-vak{
+  display:flex;
+  justify-content:center;
+  padding:18px;
+  background:var(--paper);
+  border-radius:var(--radius);
+  margin:10px 0;
+}
+.qr-vak canvas{ display:block; }
+.qr-link-tonen{ display:flex; gap:8px; align-items:center; }
+.qr-link-tonen input{
+  flex:1;
+  padding:8px 10px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text-dim);
+  font-family:var(--mono);
+  font-size:.78rem;
+}
+
+/* Print-only vak: normaal onzichtbaar, alleen zichtbaar in het printvenster (zie qrPrinten() in app.js) */
+#print-qr-vak{ display:none; }
+@media print{
+  body > *:not(#print-qr-vak){ display:none !important; }
+  #print-qr-vak{
+    display:flex !important;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    width:100%;
+    padding:60px 0;
+    background:#fff;
+    color:#111;
+  }
+  #print-qr-vak .print-qr__naam{ font-family:var(--display); font-size:2rem; font-weight:700; }
+  #print-qr-vak img{ width:260px; height:260px; }
+  #print-qr-vak .print-qr__uitleg{ font-size:1.1rem; }
+  #print-qr-vak .print-qr__code{ font-family:var(--mono); font-size:.9rem; color:#555; }
+}
+
+/* Statustracker op de zelfbestel-pagina (bestellen.html) */
+.gast-tracker__rij{ padding:10px 0; border-bottom:1px solid var(--line); }
+.gast-tracker__rij:last-child{ border-bottom:none; }
+.gast-tracker__top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.gast-tracker__nr{ font-family:var(--mono); color:var(--text-dim); font-size:.8rem; }
+.gast-tracker__items{ margin-top:4px; color:var(--text-dim); font-size:.85rem; }
+.gast-status{ padding:4px 10px; border-radius:20px; font-size:.76rem; font-weight:600; white-space:nowrap; }
+.gast-status--nieuw{ background:rgba(200,121,60,.18); color:var(--flame); }
+.gast-status--bereiden{ background:rgba(138,155,170,.18); color:var(--steel-blue); }
+.gast-status--klaar{ background:rgba(111,148,99,.18); color:var(--fresh); }
