@@ -60,6 +60,7 @@ const state = {
   plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
   plattegrondTool: "tafel",
   siteUpdates: {},
+  bewerkSiteUpdateId: null,    // id van de systeemupdate die nu bewerkt wordt in sitebeheer, of null
   gelezenUpdates: laadGelezenUpdates(),   // ids van systeemupdates die je al als gelezen hebt gemarkeerd
   beheerderActief: false,  // wordt gezet door Firebase Auth (zie onAuthStateChanged onderaan), niet meer lokaal opgeslagen
   beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
@@ -210,13 +211,22 @@ function themaWijzigen(veld, waarde){
 function themaPresetKiezen(achtergrond, tekst){
   db.ref("restaurants/" + state.restaurantCode + "/thema").update({ achtergrond, tekst });
 }
+// Kortste toegestane lengte voor het (ingekorte) meldinggeluid — hieronder mag niet.
+const GELUID_MIN_DUUR = 4;
 // Speelt een geluidsbestand (of data-URI van een eigen upload) gewoon meteen af, voor
 // zowel de voorbeeld-knop bij het kiezen als de echte melding bij een nieuwe bestelling.
-function geluidAfspelen(url){
+// duurSeconden (optioneel): speelt maximaal dit aantal seconden af en stopt dan vanzelf,
+// zodat een lang geluidsbestand toch als kort meldinggeluid gebruikt kan worden.
+function geluidAfspelen(url, duurSeconden){
   if(!url) return;
   try {
     const audio = new Audio(url);
     audio.play().catch(() => {});
+    if(duurSeconden && duurSeconden > 0){
+      setTimeout(() => {
+        try { audio.pause(); } catch(e) {}
+      }, duurSeconden * 1000);
+    }
   } catch(e) {}
 }
 function themaGeluidKiezen(key){
@@ -260,8 +270,19 @@ function speelMeldingsGeluidAf(){
   if(!heeftRecht("keuken")) return;
   const thema = state.thema || {};
   if(thema.geluid === "eigen" && thema.geluidEigenData){
-    geluidAfspelen(thema.geluidEigenData);
+    geluidAfspelen(thema.geluidEigenData, thema.geluidDuur);
   }
+}
+// Slaat op na hoeveel seconden het eigen meldinggeluid moet stoppen (ingekort), met een
+// minimum van GELUID_MIN_DUUR seconden. Leeg/0 = niet ingekort, speelt gewoon helemaal af.
+function themaGeluidDuurWijzigen(waarde){
+  let duur = parseInt(waarde, 10);
+  if(!duur || isNaN(duur)){
+    themaWijzigen("geluidDuur", null);
+    return;
+  }
+  if(duur < GELUID_MIN_DUUR) duur = GELUID_MIN_DUUR;
+  themaWijzigen("geluidDuur", duur);
 }
 // Sluit de live-verbindingen met het huidige restaurant af en gaat terug naar het startscherm.
 // Dit is GEEN "restaurant verlaten" — het restaurant blijft gewoon in je lijst "mijn restaurants"
@@ -624,7 +645,14 @@ function plattegrondCelKlikken(cel){
     return;
   }
   if(huidige && huidige.type === tool){
-    ref.remove();
+    if(tool === "stoel"){
+      // Nogmaals klikken op een stoel haalt 'm niet weg, maar draait 'm een kwart slag —
+      // zo kun je 'm blijven draaien tot de juiste kant. Alleen de "Wissen"-knop verwijdert 'm.
+      const nieuweRotatie = ((huidige.rotatie || 0) + 90) % 360;
+      ref.update({ rotatie: nieuweRotatie });
+    } else {
+      ref.remove();
+    }
   } else if(tool === "tafel"){
     // Nieuwe tafel: geef 'm automatisch het eerstvolgende tafelnummer.
     const bestaandeNummers = Object.values(state.plattegrond || {})
@@ -798,6 +826,23 @@ function siteUpdateToevoegen(titel, tekst){
 function siteUpdateVerwijderen(id){
   if(!state.beheerderActief) return;
   db.ref("site_updates/" + id).remove();
+}
+function siteUpdateBewerkStarten(id){
+  if(!state.beheerderActief) return;
+  state.bewerkSiteUpdateId = id;
+  render();
+}
+function siteUpdateBewerkAnnuleren(){
+  state.bewerkSiteUpdateId = null;
+  render();
+}
+function siteUpdateBewerkOpslaan(id, titel, tekst){
+  if(!state.beheerderActief) return;
+  titel = (titel || "").trim();
+  tekst = (tekst || "").trim();
+  if(!tekst) return;
+  db.ref("site_updates/" + id).update({ titel: titel, tekst: tekst })
+    .then(() => { state.bewerkSiteUpdateId = null; render(); });
 }
 
 // ---------- winkelwagen ----------
@@ -1065,13 +1110,26 @@ function renderBeheerPaneel(){
   const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
   const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
     const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    if(state.bewerkSiteUpdateId === id){
+      return `<li class="update-lijst__bewerk-rij">
+        <input id="site-update-bewerk-titel-${id}" placeholder="Titel (optioneel)" value="${u.titel||""}">
+        <div class="update-form__row">
+          <input id="site-update-bewerk-tekst-${id}" placeholder="Wat is er veranderd?" value="${u.tekst||""}">
+          <button class="btn btn--flame btn--sm" data-action="site-update-opslaan" data-id="${id}">Opslaan</button>
+          <button class="btn btn--ghost btn--sm" data-action="site-update-bewerk-annuleren" data-id="${id}">Annuleren</button>
+        </div>
+      </li>`;
+    }
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
         ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
         <span>${u.tekst}</span>
       </div>
-      <button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}">✕</button>
+      <div class="update-lijst__acties">
+        <button class="verwijder-x" data-action="site-update-bewerken" data-id="${id}" title="Bewerken">✎</button>
+        <button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}" title="Verwijderen">✕</button>
+      </div>
     </li>`;
   }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
 
@@ -1183,7 +1241,7 @@ function renderBestellenPlattegrond(){
       if(!obj){
         cellenHtml += `<div class="plattegrond__cel plattegrond__cel--leeg"></div>`;
       } else if(obj.type === "stoel"){
-        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel">🪑</div>`;
+        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel"><span class="plattegrond__stoel-icoon" style="transform:rotate(${obj.rotatie||0}deg);">🪑</span></div>`;
       } else {
         const bezet = !!obj.bezet;
         cellenHtml += `
@@ -1724,6 +1782,13 @@ function renderInstellingenAchtergrond(){
         <input type="file" id="geluid-upload-invoer" accept="audio/*" data-action="geluid-upload" style="display:none;">
         <span style="color:var(--text-dim); font-size:.72rem;">Max ${Math.round(GELUID_MAX_BYTES/1024)} KB, geldt voor alle apparaten van dit restaurant.</span>
       </div>
+      ${huidig.geluidEigenData ? `
+        <div class="geluid-duur-rij">
+          <label for="geluid-duur-invoer">Geluid inkorten tot</label>
+          <input type="number" id="geluid-duur-invoer" min="${GELUID_MIN_DUUR}" step="1"
+            placeholder="heel geluid" value="${huidig.geluidDuur || ""}" data-action="geluid-duur">
+          <span>sec (minimaal ${GELUID_MIN_DUUR} sec)</span>
+        </div>` : ""}
     </div>`;
 }
 
@@ -1735,7 +1800,7 @@ function renderPlattegrond(){
     for(let c=0;c<KOLOMMEN;c++){
       const key = r + "-" + c;
       const obj = (state.plattegrond || {})[key];
-      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : "🪑") : "";
+      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : `<span class="plattegrond__stoel-icoon" style="transform:rotate(${obj.rotatie||0}deg);">🪑</span>`) : "";
       cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+obj.type):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
     }
   }
@@ -1749,7 +1814,7 @@ function renderPlattegrond(){
           <button type="button" class="btn btn--sm ${state.plattegrondTool==='stoel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="stoel">🪑 Stoel</button>
           <button type="button" class="btn btn--sm ${state.plattegrondTool==='wissen'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="wissen">🧹 Wissen</button>
         </div>
-        <p style="color:var(--text-dim); font-size:.8rem; margin:12px 0 16px;">Kies hierboven wat je wilt plaatsen en klik daarna op een vakje. Nogmaals klikken met hetzelfde gereedschap haalt het weer weg. Elke tafel krijgt automatisch een nummer, en verschijnt daarmee klikbaar bij Bestellen.</p>
+        <p style="color:var(--text-dim); font-size:.8rem; margin:12px 0 16px;">Kies hierboven wat je wilt plaatsen en klik daarna op een vakje. Nogmaals klikken op een tafel haalt 'm weer weg. Nogmaals klikken op een stoel draait 'm een kwart slag — blijf klikken om 'm verder te draaien. Elke tafel krijgt automatisch een nummer, en verschijnt daarmee klikbaar bij Bestellen. Gebruik "Wissen" om een tafel of stoel echt te verwijderen.</p>
       ` : ""}
       <div class="plattegrond-wrap">
         <div class="plattegrond-grid" style="grid-template-columns:repeat(${KOLOMMEN}, 1fr);">${cellenHtml}</div>
@@ -1838,6 +1903,15 @@ root.addEventListener("click", e => {
       );
       break;
     case "site-update-verwijder": siteUpdateVerwijderen(id); break;
+    case "site-update-bewerken": siteUpdateBewerkStarten(id); break;
+    case "site-update-bewerk-annuleren": siteUpdateBewerkAnnuleren(); break;
+    case "site-update-opslaan":
+      siteUpdateBewerkOpslaan(
+        id,
+        document.getElementById("site-update-bewerk-titel-" + id).value,
+        document.getElementById("site-update-bewerk-tekst-" + id).value
+      );
+      break;
 
     case "lid-verwijderen": ledVerwijderen(id); break;
 
@@ -1856,7 +1930,7 @@ root.addEventListener("click", e => {
     case "thema-lettertype": themaWijzigen("lettertype", el.dataset.lettertype); break;
     case "thema-vorm": themaWijzigen("vorm", el.dataset.vorm); break;
     case "thema-geluid": themaGeluidKiezen(el.dataset.geluid); break;
-    case "geluid-eigen-preview": geluidAfspelen((state.thema||{}).geluidEigenData); break;
+    case "geluid-eigen-preview": geluidAfspelen((state.thema||{}).geluidEigenData, (state.thema||{}).geluidDuur); break;
     case "geluid-eigen-verwijderen": themaEigenGeluidVerwijderen(); break;
     case "plattegrond-tool": state.plattegrondTool = el.dataset.tool; render(); break;
     case "plattegrond-cel": plattegrondCelKlikken(el.dataset.cel); break;
@@ -1927,6 +2001,7 @@ root.addEventListener("change", e => {
   if(action === "wagen-ijs") wagenIjsWijzigen(id, el.checked);
   if(action === "wagen-slagroom") wagenSlagroomWijzigen(id, el.checked);
   if(action === "geluid-upload"){ themaEigenGeluidUploaden(el.files[0]); el.value = ""; }
+  if(action === "geluid-duur") themaGeluidDuurWijzigen(el.value);
 });
 
 // ============================================================
