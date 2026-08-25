@@ -85,7 +85,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .landing__eyebrow{
   font-family:var(--ui);
   font-weight:700;
-  color:var(--flame);
+  color:var(--text);
   font-size:.78rem;
   letter-spacing:.28em;
   text-transform:uppercase;
@@ -98,7 +98,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   font-size:clamp(3rem, 9vw, 5.6rem);
   margin:0;
   line-height:1;
-  color:var(--text);
+  animation:landingTitelKleur 10s linear infinite;
+}
+@keyframes landingTitelKleur{
+  0%   { color:#c8793c; }
+  20%  { color:#c15b3f; }
+  40%  { color:#d4a53a; }
+  60%  { color:#6f9463; }
+  80%  { color:#8a9baa; }
+  100% { color:#c8793c; }
 }
 .landing__title span{ color:var(--flame); }
 .landing__divider{
