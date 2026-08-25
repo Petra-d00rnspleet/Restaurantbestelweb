@@ -939,6 +939,59 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   margin-top:4px;
 }
 .beheer-rest-rij__acties{ display:flex; gap:8px; flex-shrink:0; }
+.beheer-rest-rij__leden{
+  font-size:.78rem;
+  color:var(--text-dim);
+  margin-top:6px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.beheer-rest-rij__eigenaar{ color:var(--text); }
+.beheer-rest-rij__overige{ color:var(--text-dim); }
+.beheer-rest-rij__waarschuwing{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:8px;
+  padding:8px 10px;
+  background:rgba(193,91,63,.12);
+  border:1px solid var(--ember);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-size:.8rem;
+}
+.beheer-rest-rij__waarschuwing-tijd{
+  font-family:var(--mono);
+  font-size:.66rem;
+  color:var(--text-dim);
+}
+.beheer-rest-rij__waarschuwing .verwijder-x{ margin-left:auto; flex-shrink:0; }
+
+/* ============================================================
+   WAARSCHUWING-BANNER (in het restaurant zelf, van sitebeheer)
+   ============================================================ */
+.waarschuwing-banner{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 24px;
+  background:rgba(193,91,63,.15);
+  border-bottom:1px solid var(--ember);
+  color:var(--text);
+}
+.waarschuwing-banner__icoon{ color:var(--ember); font-size:1.1rem; flex-shrink:0; }
+.waarschuwing-banner__tekst{ flex:1; font-size:.88rem; line-height:1.4; }
+.waarschuwing-banner__sluiten{
+  flex-shrink:0;
+  background:none;
+  border:none;
+  color:var(--text-dim);
+  font-size:1rem;
+  line-height:1;
+  padding:4px;
+}
+.waarschuwing-banner__sluiten:hover{ color:var(--ember); }
 
 /* ============================================================
    RESTAURANTNAAM WIJZIGEN
