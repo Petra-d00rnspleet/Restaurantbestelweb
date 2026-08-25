@@ -862,6 +862,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   font-weight:700;
   margin-right:6px;
 }
+.update-lijst__acties{ display:flex; gap:2px; flex-shrink:0; }
+.update-lijst__bewerk-rij{ flex-direction:column; align-items:stretch; gap:10px; }
+.update-lijst__bewerk-rij input{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:9px 11px;
+  font-size:.88rem;
+  width:100%;
+}
 
 .update-form{ display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
 .update-form input{
@@ -1169,6 +1180,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .geluid-optie__preview:hover{ color:var(--flame); }
 .geluid-optie__verwijder:hover{ color:var(--ember); }
 .geluid-upload{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.geluid-duur-rij{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; font-size:.82rem; color:var(--text-dim); }
+.geluid-duur-rij label{ color:var(--text); font-weight:600; }
+.geluid-duur-rij input{
+  width:90px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:7px 9px;
+  font-size:.88rem;
+}
 
 /* ============================================================
    PLATTEGROND
@@ -1212,6 +1234,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 
 .plattegrond-uitleg{ color:var(--text-dim); font-size:.85rem; margin-top:-8px; }
+.plattegrond__stoel-icoon{ display:inline-block; transition:transform .15s ease; }
 .plattegrond-legenda{
   display:flex; gap:18px;
   font-family:var(--mono);
