@@ -118,6 +118,22 @@ const LETTERTYPE_OPTIES = [
   { key:"lora",         naam:"Lora",         ui:'"Lora", serif',                   css:'"Lora", serif' },
   { key:"pacifico",     naam:"Pacifico",     ui:'"Pacifico", cursive',             css:'"Pacifico", cursive' },
   { key:"caveat",       naam:"Caveat",       ui:'"Caveat", cursive',               css:'"Caveat", cursive' },
+  { key:"bebas",        naam:"Bebas Neue",   ui:'"Bebas Neue", sans-serif',        css:'"Bebas Neue", sans-serif' },
+  { key:"dancing",      naam:"Dancing Script", ui:'"Dancing Script", cursive',     css:'"Dancing Script", cursive' },
+  { key:"abril",        naam:"Abril Fatface", ui:'"Abril Fatface", serif',         css:'"Abril Fatface", serif' },
+  { key:"quicksand",    naam:"Quicksand",    ui:'"Quicksand", sans-serif',         css:'"Quicksand", sans-serif' },
+  { key:"josefin",      naam:"Josefin Sans", ui:'"Josefin Sans", sans-serif',      css:'"Josefin Sans", sans-serif' },
+  { key:"bitter",       naam:"Bitter",       ui:'"Bitter", serif',                 css:'"Bitter", serif' },
+  { key:"comfortaa",    naam:"Comfortaa",    ui:'"Comfortaa", sans-serif',         css:'"Comfortaa", sans-serif' },
+  { key:"crimson",      naam:"Crimson Pro",  ui:'"Crimson Pro", serif',            css:'"Crimson Pro", serif' },
+];
+// Vormen voor vakken (invoervelden, knoppen, kaarten, ...) door de hele app — bepaalt de
+// hoek-afronding via de globale --radius-variabele, net zoals lettertype dat voor --ui/--display doet.
+const VORM_OPTIES = [
+  { key:"standaard", naam:"Scherp",         radius:"3px" },
+  { key:"zacht",     naam:"Licht afgerond", radius:"10px" },
+  { key:"rond",      naam:"Afgerond",       radius:"18px" },
+  { key:"pil",       naam:"Pil",            radius:"999px" },
 ];
 // Meldinggeluid bij een nieuwe bestelling: alleen "geen" (uit) of "eigen" (zelf geüpload,
 // zie thema.geluidEigenData) — er zit geen kant-en-klare lijst met geluiden meer in.
@@ -180,6 +196,12 @@ function toepassenThema(thema){
   } else {
     document.documentElement.style.removeProperty("--ui");
     document.documentElement.style.removeProperty("--display");
+  }
+  const vorm = thema && thema.vorm ? VORM_OPTIES.find(v => v.key === thema.vorm) : null;
+  if(vorm && vorm.key !== "standaard"){
+    document.documentElement.style.setProperty("--radius", vorm.radius);
+  } else {
+    document.documentElement.style.removeProperty("--radius");
   }
 }
 function themaWijzigen(veld, waarde){
@@ -1628,6 +1650,13 @@ function renderInstellingenAchtergrond(){
   const lettertypeHtml = LETTERTYPE_OPTIES.map(f => `
     <button type="button" class="lettertype-swatch ${huidigLettertype===f.key?'actief':''}" style="font-family:${f.ui};" data-action="thema-lettertype" data-lettertype="${f.key}">${f.naam}</button>`).join("");
 
+  const huidigVorm = huidig.vorm || "standaard";
+  const vormHtml = VORM_OPTIES.map(v => `
+    <button type="button" class="vorm-swatch ${huidigVorm===v.key?'actief':''}" data-action="thema-vorm" data-vorm="${v.key}">
+      <span class="vorm-swatch__voorbeeld" style="border-radius:${v.radius};"></span>
+      <span>${v.naam}</span>
+    </button>`).join("");
+
   const huidigGeluid = huidig.geluid || "geen";
   const geluidGeenHtml = `
     <div class="geluid-optie ${huidigGeluid==='geen' || huidigGeluid==='klassiek' ? 'actief':''}">
@@ -1673,8 +1702,14 @@ function renderInstellingenAchtergrond(){
 
     <div class="instel-blok">
       <div class="instel-blok__titel">Lettertype</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Verander het lettertype van de hele app.</p>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Verander het lettertype van de hele app. Elke naam staat in zijn eigen lettertype, zodat je meteen ziet hoe het eruitziet.</p>
       <div class="lettertype-rij">${lettertypeHtml}</div>
+    </div>
+
+    <div class="instel-blok">
+      <div class="instel-blok__titel">Vorm van vakken</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Bepaalt hoe scherp of rond de hoeken van tekstvakken, knoppen en kaarten door de hele app zijn.</p>
+      <div class="vorm-rij">${vormHtml}</div>
     </div>
 
     <div class="instel-blok">
@@ -1819,6 +1854,7 @@ root.addEventListener("click", e => {
       break;
     case "thema-patroon": themaWijzigen("patroon", el.dataset.patroon); break;
     case "thema-lettertype": themaWijzigen("lettertype", el.dataset.lettertype); break;
+    case "thema-vorm": themaWijzigen("vorm", el.dataset.vorm); break;
     case "thema-geluid": themaGeluidKiezen(el.dataset.geluid); break;
     case "geluid-eigen-preview": geluidAfspelen((state.thema||{}).geluidEigenData); break;
     case "geluid-eigen-verwijderen": themaEigenGeluidVerwijderen(); break;
