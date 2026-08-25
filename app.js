@@ -166,8 +166,8 @@ function patroonAchtergrondUrl(patroonKey){
   const optie = PATROON_OPTIES.find(p => p.key === patroonKey);
   if(!optie || !optie.emoji) return "";
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>` +
-    `<text x='12' y='48' font-size='38' opacity='0.09'>${optie.emoji}</text>` +
-    `<text x='82' y='118' font-size='38' opacity='0.09'>${optie.emoji}</text>` +
+    `<text x='12' y='48' font-size='42' opacity='0.22'>${optie.emoji}</text>` +
+    `<text x='82' y='118' font-size='42' opacity='0.22'>${optie.emoji}</text>` +
     `</svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
@@ -1196,7 +1196,7 @@ function renderBestellenPlattegrond(){
   }
 
   return `
-    <h2 class="view-titel">Bestellen</h2>
+    <h2 class="view-titel">Bestellen 🛒</h2>
     <p class="plattegrond-uitleg">Klik op een tafel om er een bestelling voor te plaatsen.</p>
     <div class="plattegrond-legenda">
       <span><span class="legenda-stip legenda-stip--vrij"></span>Vrij</span>
@@ -1275,7 +1275,7 @@ function renderBestellenProducten(){
   return `
     <div class="bestel-layout">
       <div>
-        <h2 class="view-titel">Bestellen</h2>
+        <h2 class="view-titel">Bestellen 🛒</h2>
         ${productenHtml}
       </div>
       <div class="wagen">
@@ -1331,7 +1331,7 @@ function renderKeuken(){
   const bereiden = alle.filter(([,b]) => b.status === "bereiden");
 
   return `
-    <h2 class="view-titel">Keuken</h2>
+    <h2 class="view-titel">Keuken 🍳</h2>
     <div class="ticket-kolommen">
       <div>
         <div class="ticket-kolom__titel"><span class="stip stip--nieuw"></span>Nieuw (${nieuw.length})</div>
@@ -1354,7 +1354,7 @@ function renderBezorgen(){
     .sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
 
   return `
-    <h2 class="view-titel">Bezorgen</h2>
+    <h2 class="view-titel">Bezorgen 🚚</h2>
     <div class="ticket-kolommen">
       <div style="grid-column:1/-1; max-width:420px;">
         <div class="ticket-kolom__titel"><span class="stip stip--klaar"></span>Klaar om te bezorgen (${klaar.length})</div>
@@ -1405,7 +1405,7 @@ function renderHistorie(){
   }).join("");
 
   return `
-    <h2 class="view-titel">Historie</h2>
+    <h2 class="view-titel">Historie 🕓</h2>
 
     <div class="instel-blok">
       <div class="instel-blok__titel">Bestellingen per categorie</div>
@@ -1454,7 +1454,7 @@ function renderInstellingen(){
   else if(state.instellingenTab === "plattegrond") inhoudHtml = renderPlattegrond();
 
   return `
-    <h2 class="view-titel">Instellingen</h2>
+    <h2 class="view-titel">Instellingen ⚙️</h2>
     <div class="subtabs">${subnavHtml}</div>
     ${inhoudHtml}`;
 }
@@ -1611,7 +1611,7 @@ function renderVoorraad(){
     </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
 
   return `
-    <h2 class="view-titel">Voorraad</h2>
+    <h2 class="view-titel">Voorraad 📦</h2>
     <div class="instel-blok">
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Zet een product op uitverkocht om het tijdelijk te verbergen bij Bestellen, zonder het te verwijderen.</p>
       <ul class="voorraad-lijst">${lijstHtml}</ul>
