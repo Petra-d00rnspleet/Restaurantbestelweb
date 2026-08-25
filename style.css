@@ -98,15 +98,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   font-size:clamp(3rem, 9vw, 5.6rem);
   margin:0;
   line-height:1;
-  animation:landingTitelKleur 10s linear infinite;
+  color:#c8793c; /* fallback voor browsers zonder gradient-tekst-ondersteuning */
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)){
+  .landing__title{
+    background:linear-gradient(90deg, #c8793c, #c15b3f, #d4a53a, #6f9463, #8a9baa, #c15b3f, #c8793c);
+    background-size:250% 100%;
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+    color:transparent;
+    animation:landingTitelKleur 10s linear infinite;
+  }
 }
 @keyframes landingTitelKleur{
-  0%   { color:#c8793c; }
-  20%  { color:#c15b3f; }
-  40%  { color:#d4a53a; }
-  60%  { color:#6f9463; }
-  80%  { color:#8a9baa; }
-  100% { color:#c8793c; }
+  0%   { background-position:0% 50%; }
+  100% { background-position:250% 50%; }
 }
 .landing__title span{ color:var(--flame); }
 .landing__divider{
@@ -1143,6 +1150,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .geluid-optie:hover{ transform:translateY(-2px); }
 .geluid-optie.actief{ border-color:var(--flame); }
 .geluid-optie__kies{
+  background:transparent;
+  border:none;
   padding:12px 18px;
   color:var(--text);
   font-family:var(--ui);
@@ -1150,8 +1159,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   white-space:nowrap;
 }
 .geluid-optie__preview, .geluid-optie__verwijder{
-  padding:12px 14px;
+  background:transparent;
+  border:none;
   border-left:1px solid var(--line);
+  padding:12px 14px;
   color:var(--text-dim);
   font-size:.8rem;
 }
