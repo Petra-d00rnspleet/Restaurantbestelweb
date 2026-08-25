@@ -1116,13 +1116,13 @@ function renderDashboard(){
   // Alleen tabbladen tonen waar dit teamlid rechten voor heeft; Instellingen is altijd zichtbaar
   // (code bekijken / restaurant verlaten kan iedereen).
   const tabsConfig = [
-    { key:"bestellen", label:"Bestellen" },
-    { key:"keuken", label:`Keuken ${aantalNieuw?`<span class="badge">${aantalNieuw}</span>`:""}` },
-    { key:"bezorgen", label:`Bezorgen ${aantalKlaar?`<span class="badge">${aantalKlaar}</span>`:""}` },
-    { key:"historie", label:"Historie" },
+    { key:"bestellen", label:"Bestellen 🛒" },
+    { key:"keuken", label:`Keuken 🍳 ${aantalNieuw?`<span class="badge">${aantalNieuw}</span>`:""}` },
+    { key:"bezorgen", label:`Bezorgen 🚚 ${aantalKlaar?`<span class="badge">${aantalKlaar}</span>`:""}` },
+    { key:"historie", label:"Historie 🕓" },
   ].filter(t => heeftRecht(t.key));
-  if(heeftRecht('instellingen')) tabsConfig.push({ key:"voorraad", label:"Voorraad" });
-  tabsConfig.push({ key:"instellingen", label:"Instellingen" });
+  if(heeftRecht('instellingen')) tabsConfig.push({ key:"voorraad", label:"Voorraad 📦" });
+  tabsConfig.push({ key:"instellingen", label:"Instellingen ⚙️" });
 
   if(!tabsConfig.some(t => t.key === state.huidigeView)){
     state.huidigeView = tabsConfig[0].key;
