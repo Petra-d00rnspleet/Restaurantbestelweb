@@ -55,6 +55,7 @@ const state = {
   categorieen: {},             // categorieën van het huidige restaurant
   leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
   ledenGeladen: false,
+  waarschuwing: null,          // { tekst, tijdstip } — actieve waarschuwing van sitebeheer aan dit restaurant, of null
   thema: null,                 // { achtergrond, tekst } — eigen kleuren voor dit restaurant
   plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
   plattegrondTool: "tafel",
@@ -253,6 +254,7 @@ function verlaatHuidigRestaurant(){
     db.ref("restaurants/" + code + "/historie").off();
     db.ref("restaurants/" + code + "/leden").off();
     db.ref("restaurants/" + code + "/thema").off();
+    db.ref("restaurants/" + code + "/waarschuwing").off();
     db.ref("restaurants/" + code + "/plattegrond").off();
     db.ref("restaurants/" + code + "/categorieen").off();
   }
@@ -263,6 +265,7 @@ function verlaatHuidigRestaurant(){
   state.leden = {};
   state.ledenGeladen = false;
   state.thema = null;
+  state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
   bekendeBestellingIds = null;
@@ -453,6 +456,10 @@ function startRestaurant(){
   db.ref("restaurants/" + code + "/thema").on("value", snap => {
     state.thema = snap.val() || null;
     toepassenThema(state.thema);
+    render();
+  });
+  db.ref("restaurants/" + code + "/waarschuwing").on("value", snap => {
+    state.waarschuwing = snap.val() || null;
     render();
   });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => {
@@ -674,6 +681,7 @@ function beheerRestaurantBezoeken(code){
   state.leden = {};
   state.ledenGeladen = false;
   state.thema = null;
+  state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
   bekendeBestellingIds = null;
@@ -682,6 +690,7 @@ function beheerRestaurantBezoeken(code){
   db.ref("restaurants/" + code + "/historie").on("value", snap => { state.historie = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/leden").on("value", snap => { state.leden = snap.val() || {}; state.ledenGeladen = true; render(); });
   db.ref("restaurants/" + code + "/thema").on("value", snap => { state.thema = snap.val() || null; toepassenThema(state.thema); render(); });
+  db.ref("restaurants/" + code + "/waarschuwing").on("value", snap => { state.waarschuwing = snap.val() || null; render(); });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => { state.plattegrond = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/categorieen").on("value", snap => { state.categorieen = snap.val() || {}; render(); });
   render();
@@ -696,6 +705,7 @@ function beheerRestaurantVerlaten(doorRender){
     db.ref("restaurants/" + code + "/historie").off();
     db.ref("restaurants/" + code + "/leden").off();
     db.ref("restaurants/" + code + "/thema").off();
+    db.ref("restaurants/" + code + "/waarschuwing").off();
     db.ref("restaurants/" + code + "/plattegrond").off();
     db.ref("restaurants/" + code + "/categorieen").off();
   }
@@ -708,6 +718,7 @@ function beheerRestaurantVerlaten(doorRender){
   state.leden = {};
   state.ledenGeladen = false;
   state.thema = null;
+  state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
   bekendeBestellingIds = null;
@@ -724,6 +735,32 @@ function beheerRestaurantVerwijderen(code){
     toonToast("Restaurant verwijderd");
     render();
   });
+}
+// Stuurt een waarschuwing naar één specifiek restaurant — zichtbaar als banner boven aan hun
+// scherm, voor alle teamleden van dat restaurant, totdat iemand daar 'm sluit (of sitebeheer
+// 'm intrekt). Overschrijft een eventuele eerder verstuurde waarschuwing aan dit restaurant.
+function beheerRestaurantWaarschuwen(code){
+  const gegevens = state.alleRestaurants[code];
+  const naam = gegevens ? gegevens.naam : code;
+  const bestaande = gegevens && gegevens.waarschuwing ? gegevens.waarschuwing.tekst : "";
+  const tekst = prompt(`Waarschuwing versturen naar "${naam}" (${code}):`, bestaande || "");
+  if(tekst === null) return;
+  const schoon = tekst.trim();
+  if(!schoon){ toonToast("Geen waarschuwing verstuurd — tekst was leeg."); return; }
+  db.ref("restaurants/" + code + "/waarschuwing").set({
+    tekst: schoon,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => toonToast("Waarschuwing verstuurd naar " + naam));
+}
+// Trekt een al verstuurde waarschuwing weer in, vanuit het sitebeheer-paneel.
+function beheerRestaurantWaarschuwingIntrekken(code){
+  db.ref("restaurants/" + code + "/waarschuwing").remove().then(() => toonToast("Waarschuwing ingetrokken"));
+}
+// Sluit de waarschuwing-banner vanuit het restaurant zelf (door een teamlid) — verwijdert 'm
+// voor iedereen, net als sitebeheer dat ook zou kunnen doen.
+function waarschuwingSluiten(){
+  if(!state.restaurantCode) return;
+  db.ref("restaurants/" + state.restaurantCode + "/waarschuwing").remove();
 }
 function siteUpdateToevoegen(titel, tekst){
   if(!state.beheerderActief) return;
@@ -967,11 +1004,15 @@ function renderBeheerPaneel(){
   const restaurantsHtml = !state.alleRestaurantsGeladen ? `<div class="leeg">Restaurants laden…</div>`
     : restaurantsArr.length === 0 ? `<div class="leeg">Nog geen restaurants aangemaakt.</div>`
     : restaurantsArr.map(([code, r]) => {
-        const aantalLeden = Object.keys(r.leden || {}).length;
+        const ledenArr = Object.entries(r.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
+        const eigenaarLid = ledenArr.find(([,l]) => l.eigenaar);
+        const overigeLeden = ledenArr.filter(([,l]) => !l.eigenaar);
+        const aantalLeden = ledenArr.length;
         const aantalProducten = Object.keys(r.menu || {}).length;
         const aantalOpenstaand = Object.keys(r.bestellingen || {}).length;
         const aantalHistorie = Object.keys(r.historie || {}).length;
         const datum = r.aangemaakt ? new Date(r.aangemaakt).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "";
+        const wTijd = r.waarschuwing && r.waarschuwing.tijdstip ? new Date(r.waarschuwing.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
         return `
         <div class="beheer-rest-rij">
           <div class="beheer-rest-rij__info">
@@ -981,9 +1022,19 @@ function renderBeheerPaneel(){
               ${aantalOpenstaand} openstaande bestelling${aantalOpenstaand===1?"":"en"} · ${aantalHistorie} in historie
               ${datum ? ` · aangemaakt ${datum}` : ""}
             </div>
+            <div class="beheer-rest-rij__leden">
+              ${eigenaarLid ? `<span class="beheer-rest-rij__eigenaar">👤 ${eigenaarLid[1].naam}<span class="team-rij__badge" style="margin-left:6px;">Eigenaar</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
+              ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">Team: ${overigeLeden.map(([,l]) => l.naam).join(", ")}</span>` : ""}
+            </div>
+            ${r.waarschuwing ? `
+              <div class="beheer-rest-rij__waarschuwing">
+                ⚠ ${r.waarschuwing.tekst} <span class="beheer-rest-rij__waarschuwing-tijd">${wTijd ? "· verstuurd " + wTijd : ""}</span>
+                <button class="verwijder-x" data-action="beheer-waarschuwing-intrekken" data-id="${code}" title="Waarschuwing intrekken">✕</button>
+              </div>` : ""}
           </div>
           <div class="beheer-rest-rij__acties">
             <button class="btn btn--steel btn--sm" data-action="beheer-bezoeken" data-id="${code}">Bezoeken</button>
+            <button class="btn btn--ghost btn--sm" data-action="beheer-waarschuwen" data-id="${code}">${r.waarschuwing ? "Waarschuwing aanpassen" : "Waarschuwen"}</button>
             <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-verwijderen" data-id="${code}">Verwijderen</button>
           </div>
         </div>`;
@@ -1072,6 +1123,12 @@ function renderDashboard(){
           ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
         </div>
       </header>
+      ${state.waarschuwing ? `
+      <div class="waarschuwing-banner">
+        <span class="waarschuwing-banner__icoon">⚠</span>
+        <span class="waarschuwing-banner__tekst"><b>Bericht van sitebeheer:</b> ${state.waarschuwing.tekst}</span>
+        <button class="waarschuwing-banner__sluiten" data-action="waarschuwing-sluiten" title="Sluiten">✕</button>
+      </div>` : ""}
       <nav class="tabs">${tabsHtml}</nav>
       <main class="view" id="view-inhoud"></main>
     </div>`;
@@ -1735,6 +1792,9 @@ root.addEventListener("click", e => {
     case "beheer-uitloggen": beheerderUitloggen(); break;
     case "beheer-bezoeken": beheerRestaurantBezoeken(id); break;
     case "beheer-verwijderen": beheerRestaurantVerwijderen(id); break;
+    case "beheer-waarschuwen": beheerRestaurantWaarschuwen(id); break;
+    case "beheer-waarschuwing-intrekken": beheerRestaurantWaarschuwingIntrekken(id); break;
+    case "waarschuwing-sluiten": waarschuwingSluiten(); break;
     case "beheer-terug-paneel": beheerRestaurantVerlaten(); break;
     case "site-update-toevoegen":
       siteUpdateToevoegen(
