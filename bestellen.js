@@ -236,6 +236,8 @@ function stoelIconHtml(rotatie){
   return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
     <span class="plattegrond__stoel-icoon__rug"></span>
     <span class="plattegrond__stoel-icoon__zit"></span>
+    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--l"></span>
+    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--r"></span>
   </span>`;
 }
 function renderTafelKiezen(){
