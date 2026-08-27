@@ -149,8 +149,8 @@ function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam){
   else state.mijnRestaurants.push(entry);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
 }
-// Haalt een restaurant uit de lijst "mijn restaurants" — gebeurt alleen automatisch (verwijderd
-// door eigenaar of sitebeheer), nooit doordat iemand zelf op een "verlaten"-knop klikt.
+// Haalt een restaurant uit de lijst "mijn restaurants" (dit apparaat) — gebeurt automatisch
+// (verwijderd door eigenaar of sitebeheer) én meteen zodra je zelf wisselt, verwijdert of verlaat.
 function mijnRestaurantVerwijderenUitLijst(code){
   state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
@@ -285,9 +285,8 @@ function themaGeluidDuurWijzigen(waarde){
   themaWijzigen("geluidDuur", duur);
 }
 // Sluit de live-verbindingen met het huidige restaurant af en gaat terug naar het startscherm.
-// Dit is GEEN "restaurant verlaten" — het restaurant blijft gewoon in je lijst "mijn restaurants"
-// staan, dit is puur even wisselen. Verwijderen uit die lijst gebeurt alleen automatisch
-// (zie mijnRestaurantVerwijderenUitLijst), nooit via een knop die de gebruiker zelf indrukt.
+// Haalt zelf niets uit "mijn restaurants" — dat doet de aanroeper vooraf, als dat gewenst is
+// (zie de "terug-naar-start"-actie, restaurantVerwijderenDoorEigenaar en restaurantVerlatenAlsLid).
 function verlaatHuidigRestaurant(){
   const code = state.restaurantCode;
   if(code){
@@ -319,6 +318,41 @@ function verlaatHuidigRestaurant(){
   state.bestelModus = "plattegrond";
   state.actieveTafelCel = null;
   render();
+}
+// Eigenaar: verwijdert het hele restaurant meteen (alle menu, bestellingen en historie) —
+// kan voortaan ook door de eigenaar zelf, niet meer alleen via sitebeheer. Onomkeerbaar.
+function restaurantVerwijderenDoorEigenaar(){
+  if(!state.restaurantCode || state.beheerBezoekModus) return;
+  const eigenLid = state.leden[state.ledId];
+  if(!eigenLid || !eigenLid.eigenaar) return;
+  if(!confirm(`Restaurant "${state.restaurantNaam}" volledig verwijderen? Dit verwijdert al het menu, alle bestellingen en de hele historie, en kan niet ongedaan gemaakt worden.`)) return;
+  const code = state.restaurantCode;
+  // Eerst "naam" én "leden" loskoppelen, zodat de meldingen hieronder (in startRestaurant)
+  // niet per ongeluk nog afgaan ("restaurant bestaat niet meer" / "door eigenaar verwijderd")
+  // tijdens het opruimen van je eigen, zelf gekozen verwijderactie.
+  db.ref("restaurants/" + code + "/naam").off();
+  db.ref("restaurants/" + code + "/leden").off();
+  db.ref("restaurants/" + code).remove();
+  toonToast("Restaurant verwijderd");
+  mijnRestaurantVerwijderenUitLijst(code);
+  verlaatHuidigRestaurant();
+}
+// Teamlid (niet-eigenaar): verlaat dit restaurant zelf, meteen — verwijdert je eigen teamlid-
+// account en haalt het restaurant meteen uit je lijst op dit apparaat. Om weer mee te doen
+// heb je daarna een nieuwe join-code van de eigenaar nodig.
+function restaurantVerlatenAlsLid(){
+  if(!state.restaurantCode || !state.ledId || state.beheerBezoekModus) return;
+  const eigenLid = state.leden[state.ledId];
+  if(eigenLid && eigenLid.eigenaar) return; // de eigenaar kan niet "verlaten", alleen verwijderen
+  if(!confirm("Dit restaurant verlaten? Je hebt daarna een nieuwe code van de eigenaar nodig om er weer bij te komen.")) return;
+  const code = state.restaurantCode;
+  const ledId = state.ledId;
+  // Eerst de ledenlijst-listener loskoppelen, zodat de melding "je bent verwijderd door de
+  // eigenaar" hieronder niet per ongeluk verschijnt over je eigen, zelf gekozen actie.
+  db.ref("restaurants/" + code + "/leden").off();
+  db.ref("restaurants/" + code + "/leden/" + ledId).remove();
+  mijnRestaurantVerwijderenUitLijst(code);
+  verlaatHuidigRestaurant();
 }
 // Bepaalt of het huidige teamlid een bepaald recht heeft (of alles mag, als eigenaar).
 // Zolang de ledenlijst nog niet is geladen (of je eigen lid nog niet gevonden is,
@@ -1582,9 +1616,18 @@ function renderInstellingenAlgemeen(){
       ${state.beheerBezoekModus ? `
         <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je bekijkt dit restaurant als beheerder — dit apparaat is er geen lid van.</p>
         <button class="btn btn--ghost" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>
+      ` : isEigenaar ? `
+        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen haalt dit restaurant meteen uit je lijst op dit apparaat — je hebt daarna de code weer nodig om terug te komen. Verwijderen maakt het restaurant (menu, bestellingen en historie) meteen en definitief weg, voor iedereen.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel restaurant</button>
+          <button class="btn btn--ghost" style="border-color:var(--ember); color:var(--ember);" data-action="restaurant-verwijderen-eigenaar">🗑️ Restaurant verwijderen</button>
+        </div>
       ` : `
-        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je kunt een restaurant niet zelf verlaten — het blijft in je lijst staan, ook op dit apparaat. Alleen de eigenaar (door jou als teamlid te verwijderen) of sitebeheer (door het hele restaurant te verwijderen) kan het uit je lijst halen.</p>
-        <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel naar een ander restaurant</button>
+        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen of verlaten haalt dit restaurant meteen uit je lijst op dit apparaat. Verlaten verwijdert ook je teamlid-account — je hebt daarna een nieuwe code van de eigenaar nodig om er weer bij te komen.</p>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel restaurant</button>
+          <button class="btn btn--ghost" style="border-color:var(--ember); color:var(--ember);" data-action="restaurant-verlaten-lid">🚪 Restaurant verlaten</button>
+        </div>
       `}
     </div>
 
@@ -1864,7 +1907,12 @@ root.addEventListener("click", e => {
       navigator.clipboard?.writeText(state.restaurantCode);
       toonToast("Code gekopieerd: " + state.restaurantCode);
       break;
-    case "terug-naar-start": verlaatHuidigRestaurant(); break;
+    case "terug-naar-start":
+      if(state.restaurantCode) mijnRestaurantVerwijderenUitLijst(state.restaurantCode);
+      verlaatHuidigRestaurant();
+      break;
+    case "restaurant-verwijderen-eigenaar": restaurantVerwijderenDoorEigenaar(); break;
+    case "restaurant-verlaten-lid": restaurantVerlatenAlsLid(); break;
 
     case "toevoegen-wagen": toevoegenAanWagen(id, state.menu[id]); break;
     case "wagen-plus": wagenAantalWijzigen(id, 1); break;
