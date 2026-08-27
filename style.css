@@ -1434,6 +1434,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .gast-tracker__top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
 .gast-tracker__nr{ font-family:var(--mono); color:var(--text-dim); font-size:.8rem; }
 .gast-tracker__items{ margin-top:4px; color:var(--text-dim); font-size:.85rem; }
+.gast-tracker__wachtrij{ margin-top:6px; font-size:.8rem; color:var(--flame); font-weight:600; }
 .gast-status{ padding:4px 10px; border-radius:20px; font-size:.76rem; font-weight:600; white-space:nowrap; }
 .gast-status--nieuw{ background:rgba(200,121,60,.18); color:var(--flame); }
 .gast-status--bereiden{ background:rgba(138,155,170,.18); color:var(--steel-blue); }
