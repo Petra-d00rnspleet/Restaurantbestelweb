@@ -609,7 +609,7 @@ function historieWissen(){
   if(!confirm("Weet je zeker dat je de hele geschiedenis van dit restaurant wilt wissen? Dit kan niet ongedaan gemaakt worden.")) return;
   db.ref("restaurants/" + state.restaurantCode + "/historie").remove();
 }
-function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze){
+function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
   if(!naam.trim() || !prijs || !categorie) return;
   db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
     naam: naam.trim(),
@@ -618,6 +618,7 @@ function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuz
     emoji: emoji || "🍽️",
     ijsKeuze: !!ijsKeuze,
     slagroomKeuze: !!slagroomKeuze,
+    glasKeuze: !!glasKeuze,
     uitverkocht: false,
   });
 }
@@ -890,8 +891,10 @@ function toevoegenAanWagen(id, item){
       aantal:1, notitie:"",
       ijsKeuze: !!item.ijsKeuze,
       slagroomKeuze: !!item.slagroomKeuze,
+      glasKeuze: !!item.glasKeuze,
       ijs: false,
       slagroom: false,
+      glas: false,
     };
   }
   render();
@@ -915,11 +918,15 @@ function wagenIjsWijzigen(id, waarde){
 function wagenSlagroomWijzigen(id, waarde){
   if(state.winkelwagen[id]) state.winkelwagen[id].slagroom = !!waarde;
 }
-// Bouwt de extra-informatieregel onder een besteld item (notitie, ijs, slagroom).
+function wagenGlasWijzigen(id, waarde){
+  if(state.winkelwagen[id]) state.winkelwagen[id].glas = !!waarde;
+}
+// Bouwt de extra-informatieregel onder een besteld item (notitie, ijs, slagroom, glas).
 function itemExtraHtml(it){
   const delen = [];
   if(it.ijs) delen.push("🧊 Met ijs");
   if(it.slagroom) delen.push("🥛 Met slagroom");
+  if(it.glas) delen.push("🥂 Heeft al een glas");
   if(it.notitie) delen.push(it.notitie);
   return delen.length ? `<span class="ticket__item-notitie">— ${delen.join(" · ")}</span>` : "";
 }
@@ -1320,6 +1327,7 @@ function renderBestellenProducten(){
         const opties = [];
         if(i.ijsKeuze) opties.push("🧊");
         if(i.slagroomKeuze) opties.push("🥛");
+        if(i.glasKeuze) opties.push("🥂");
         productenHtml += `
           <button class="product-card ${uitverkocht?'product-card--uitverkocht':''}" ${uitverkocht?'disabled':'data-action="toevoegen-wagen"'} data-id="${id}">
             ${uitverkocht ? `<span class="product-card__uitverkocht-badge">Uitverkocht</span>` : `<span class="product-card__plus">+</span>`}
@@ -1355,6 +1363,11 @@ function renderBestellenProducten(){
           <label class="wagen__checkbox">
             <input type="checkbox" data-action="wagen-slagroom" data-id="${id}" ${i.slagroom?"checked":""}>
             🥛 Met slagroom
+          </label>` : ""}
+        ${i.glasKeuze ? `
+          <label class="wagen__checkbox">
+            <input type="checkbox" data-action="wagen-glas" data-id="${id}" ${i.glas?"checked":""}>
+            🥂 Heeft al een glas
           </label>` : ""}
         <input class="wagen__notitie" placeholder="Notitie, bijv. 'geen ui'" value="${i.notitie||""}" data-action="wagen-notitie" data-id="${id}">
         <button class="wagen__verwijder" data-action="wagen-verwijder" data-id="${id}">verwijderen</button>
@@ -1644,7 +1657,7 @@ function renderInstellingenProducten(){
 
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li>
-      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
+      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.glasKeuze?' <span class="cat">🥂 glas</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
       <span style="display:flex; align-items:center; gap:10px;">
         <span>${euro(i.prijs)}</span>
         <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
@@ -1663,12 +1676,12 @@ function renderInstellingenProducten(){
 
   return `
     <div class="instel-blok">
-      <div class="instel-blok__titel">Categorieën</div>
+      <div class="instel-blok__titel">🏷️ Categorieën</div>
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Maak hier eerst een categorie aan — die kies je daarna bij het toevoegen van een product. Bij Bestellen staan de producten van elke categorie in een rijtje onder de naam van die categorie.</p>
       <div class="categorie-lijst">${categorieLijstHtml}</div>
       <div class="categorie-form">
         <input id="nieuwe-categorie" placeholder="Nieuwe categorie, bijv. Dranken">
-        <button class="btn btn--flame btn--sm" data-action="categorie-toevoegen">Toevoegen</button>
+        <button class="btn btn--flame btn--sm" data-action="categorie-toevoegen">✨ Toevoegen</button>
       </div>
     </div>
 
@@ -1694,6 +1707,10 @@ function renderInstellingenProducten(){
         <label class="menu-form__optie">
           <input type="checkbox" id="menu-slagroom">
           🥛 Slagroomkeuze aanbieden
+        </label>
+        <label class="menu-form__optie">
+          <input type="checkbox" id="menu-glaskeuze">
+          🥂 Glaskeuze aanbieden (heeft de gast al een glas, ja/nee)
         </label>
       </div>
       <ul class="menu-lijst">${menuHtml}</ul>
@@ -2011,7 +2028,8 @@ root.addEventListener("click", e => {
         document.getElementById("menu-categorie").value,
         state.nieuwProductEmoji,
         document.getElementById("menu-ijskeuze").checked,
-        document.getElementById("menu-slagroom").checked
+        document.getElementById("menu-slagroom").checked,
+        document.getElementById("menu-glaskeuze").checked
       );
       state.nieuwProductEmoji = "🍽️";
       render();
@@ -2048,6 +2066,7 @@ root.addEventListener("change", e => {
   if(action === "voorraad-toggle") menuItemUitverkochtWijzigen(id, el.checked);
   if(action === "wagen-ijs") wagenIjsWijzigen(id, el.checked);
   if(action === "wagen-slagroom") wagenSlagroomWijzigen(id, el.checked);
+  if(action === "wagen-glas") wagenGlasWijzigen(id, el.checked);
   if(action === "geluid-upload"){ themaEigenGeluidUploaden(el.files[0]); el.value = ""; }
   if(action === "geluid-duur") themaGeluidDuurWijzigen(el.value);
 });
