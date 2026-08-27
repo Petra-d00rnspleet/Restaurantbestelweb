@@ -1293,11 +1293,35 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 
 .plattegrond-uitleg{ color:var(--text-dim); font-size:.85rem; margin-top:-8px; }
+/* Stoeltje als klein "3D" vormpje (zit + rugleuning) i.p.v. het 🪑-emoji: een emoji staat er
+   op zijn kop uit zodra je 'm 180° draait, dit blokje niet — de rugleuning laat gewoon zien
+   waar de stoel naartoe kijkt, in elke rotatiestand. */
 .plattegrond__stoel-icoon{
+  position:relative;
   display:inline-block;
-  font-size:1.15rem;
+  width:20px; height:20px;
   transition:transform .15s ease;
-  filter:drop-shadow(0 1px 2px rgba(0,0,0,.4));
+}
+.plattegrond__stoel-icoon__zit{
+  position:absolute;
+  left:2px; right:2px; bottom:1px;
+  height:14px;
+  border-radius:5px;
+  background:linear-gradient(165deg, #b9c6d1 0%, #8a9baa 55%, #64757f 100%);
+  box-shadow:
+    0 3px 4px rgba(0,0,0,.4),
+    inset 0 1px 1px rgba(255,255,255,.35),
+    inset 0 -2px 3px rgba(0,0,0,.25);
+}
+.plattegrond__stoel-icoon__rug{
+  position:absolute;
+  left:3px; right:3px; top:0;
+  height:8px;
+  border-radius:4px 4px 2px 2px;
+  background:linear-gradient(165deg, #9caebb 0%, #6d7e8c 100%);
+  box-shadow:
+    0 2px 3px rgba(0,0,0,.35),
+    inset 0 1px 1px rgba(255,255,255,.3);
 }
 .plattegrond-legenda{
   display:flex; gap:18px;
