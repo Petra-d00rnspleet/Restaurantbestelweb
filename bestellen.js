@@ -45,6 +45,8 @@ const state = {
   tafel: "",
   winkelwagen: {},
   mijnBestellingen: {},        // live, gefilterd op gastId
+  alleBestellingen: {},        // live, ALLE bestellingen van dit restaurant — alleen gebruikt om de
+                                // wachtrij-positie ("x bestellingen voor jou") te berekenen, niet getoond
 };
 
 // ---------- kleine helpers (bewust gedupliceerd uit app.js — losstaand script) ----------
@@ -136,6 +138,12 @@ function verbindenLuisteraars(){
   // Alleen je eigen bestellingen (op dit apparaat) van dít restaurant, live.
   db.ref("restaurants/" + code + "/bestellingen").orderByChild("gastId").equalTo(gastId).on("value", snap => {
     state.mijnBestellingen = snap.val() || {};
+    render();
+  });
+  // ALLE bestellingen van dit restaurant, live — puur om te kunnen tellen hoeveel bestellingen
+  // er nog vóór die van jou in de wachtrij staan (zie renderMijnBestellingenTracker).
+  db.ref("restaurants/" + code + "/bestellingen").on("value", snap => {
+    state.alleBestellingen = snap.val() || {};
     render();
   });
 }
@@ -259,11 +267,20 @@ function renderTafelKiezen(){
 function renderMijnBestellingenTracker(){
   const eigen = Object.entries(state.mijnBestellingen || {});
   if(!eigen.length) return "";
+  // Alle bestellingen van het hele restaurant die nog niet klaar zijn (dus nog in de keuken-
+  // wachtrij staan) — gebruikt om te laten zien hoeveel bestellingen er nog vóór die van jou zijn.
+  const nogInDeWachtrij = Object.entries(state.alleBestellingen || {})
+    .filter(([,b]) => b.status === "nieuw" || b.status === "bereiden");
   const rijen = eigen
     .sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0))
     .map(([id,b]) => {
       const label = GAST_STATUS_LABELS[b.status] || b.status;
       const items = (b.items||[]).map(it => `${it.aantal}× ${it.naam}`).join(", ");
+      let wachtrijHtml = "";
+      if(b.status === "nieuw" || b.status === "bereiden"){
+        const voorJou = nogInDeWachtrij.filter(([oid,o]) => oid !== id && (o.aangemaakt||0) < (b.aangemaakt||0)).length;
+        wachtrijHtml = `<div class="gast-tracker__wachtrij">🧑‍🍳 ${voorJou > 0 ? `${voorJou} bestelling${voorJou===1?"":"en"} voor jou in de wachtrij` : "Jij bent als eerste aan de beurt"}</div>`;
+      }
       return `
         <div class="gast-tracker__rij">
           <div class="gast-tracker__top">
@@ -271,6 +288,7 @@ function renderMijnBestellingenTracker(){
             <span class="gast-status gast-status--${b.status||'nieuw'}">${label}</span>
           </div>
           <div class="gast-tracker__items">${items}</div>
+          ${wachtrijHtml}
         </div>`;
     }).join("");
   return `
