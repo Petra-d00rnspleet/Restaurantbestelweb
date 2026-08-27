@@ -154,7 +154,8 @@ function gastToevoegenAanWagen(id, item){
   if(state.winkelwagen[id]) state.winkelwagen[id].aantal += 1;
   else state.winkelwagen[id] = {
     naam:item.naam, prijs:item.prijs, aantal:1, notitie:"", emoji:item.emoji||"", categorie:item.categorie||"",
-    ijsKeuze:!!item.ijsKeuze, slagroomKeuze:!!item.slagroomKeuze, ijs:false, slagroom:false,
+    ijsKeuze:!!item.ijsKeuze, slagroomKeuze:!!item.slagroomKeuze, glasKeuze:!!item.glasKeuze,
+    ijs:false, slagroom:false, glas:false,
   };
   render();
 }
@@ -169,6 +170,7 @@ function gastWagenVerwijderen(id){ delete state.winkelwagen[id]; render(); }
 function gastWagenNotitieWijzigen(id, waarde){ if(state.winkelwagen[id]) state.winkelwagen[id].notitie = waarde; }
 function gastWagenIjsWijzigen(id, waarde){ if(state.winkelwagen[id]) state.winkelwagen[id].ijs = waarde; }
 function gastWagenSlagroomWijzigen(id, waarde){ if(state.winkelwagen[id]) state.winkelwagen[id].slagroom = waarde; }
+function gastWagenGlasWijzigen(id, waarde){ if(state.winkelwagen[id]) state.winkelwagen[id].glas = waarde; }
 
 function gastTafelKiezen(cel){
   const celData = state.plattegrond[cel];
@@ -318,6 +320,7 @@ function renderZelfBestellen(){
         const opties = [];
         if(i.ijsKeuze) opties.push("🧊");
         if(i.slagroomKeuze) opties.push("🥛");
+        if(i.glasKeuze) opties.push("🥂");
         productenHtml += `
           <button class="product-card ${uitverkocht?'product-card--uitverkocht':''}" ${uitverkocht?'disabled':'data-action="gast-toevoegen-wagen"'} data-id="${id}">
             ${uitverkocht ? `<span class="product-card__uitverkocht-badge">Uitverkocht</span>` : `<span class="product-card__plus">+</span>`}
@@ -353,6 +356,11 @@ function renderZelfBestellen(){
           <label class="wagen__checkbox">
             <input type="checkbox" data-action="gast-wagen-slagroom" data-id="${id}" ${i.slagroom?"checked":""}>
             🥛 Met slagroom
+          </label>` : ""}
+        ${i.glasKeuze ? `
+          <label class="wagen__checkbox">
+            <input type="checkbox" data-action="gast-wagen-glas" data-id="${id}" ${i.glas?"checked":""}>
+            🥂 Heb al een glas
           </label>` : ""}
         <input class="wagen__notitie" placeholder="Notitie, bijv. 'geen ui'" value="${i.notitie||""}" data-action="gast-wagen-notitie" data-id="${id}">
         <button class="wagen__verwijder" data-action="gast-wagen-verwijder" data-id="${id}">verwijderen</button>
@@ -414,6 +422,7 @@ root.addEventListener("change", e => {
   const id = el.dataset.id;
   if(action === "gast-wagen-ijs") gastWagenIjsWijzigen(id, el.checked);
   if(action === "gast-wagen-slagroom") gastWagenSlagroomWijzigen(id, el.checked);
+  if(action === "gast-wagen-glas") gastWagenGlasWijzigen(id, el.checked);
 });
 
 // ============================================================
