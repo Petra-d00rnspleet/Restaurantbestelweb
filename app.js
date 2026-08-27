@@ -670,6 +670,14 @@ function ledVerwijderen(ledId){
 }
 
 // ---------- plattegrond (tafels & stoelen) ----------
+// Bouwt een klein "3D" stoeltje (zit + rugleuning) dat mee kan draaien met obj.rotatie, zonder
+// er ooit "op zijn kop" uit te zien zoals een geroteerd 🪑-emoji zou doen.
+function stoelIconHtml(rotatie){
+  return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
+    <span class="plattegrond__stoel-icoon__rug"></span>
+    <span class="plattegrond__stoel-icoon__zit"></span>
+  </span>`;
+}
 function plattegrondCelKlikken(cel){
   if(!heeftRecht('instellingen')) return;
   const tool = state.plattegrondTool;
@@ -1282,7 +1290,7 @@ function renderBestellenPlattegrond(){
       if(!obj){
         cellenHtml += `<div class="plattegrond__cel plattegrond__cel--leeg"></div>`;
       } else if(obj.type === "stoel"){
-        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel"><span class="plattegrond__stoel-icoon" style="transform:rotate(${obj.rotatie||0}deg);">🪑</span></div>`;
+        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel">${stoelIconHtml(obj.rotatie)}</div>`;
       } else {
         const bezet = !!obj.bezet;
         cellenHtml += `
@@ -1860,7 +1868,7 @@ function renderPlattegrond(){
     for(let c=0;c<KOLOMMEN;c++){
       const key = r + "-" + c;
       const obj = (state.plattegrond || {})[key];
-      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : `<span class="plattegrond__stoel-icoon" style="transform:rotate(${obj.rotatie||0}deg);">🪑</span>`) : "";
+      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : stoelIconHtml(obj.rotatie)) : "";
       cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+obj.type):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
     }
   }
