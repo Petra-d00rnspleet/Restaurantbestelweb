@@ -230,6 +230,14 @@ function renderFout(){
       <p class="landing__sub">${state.foutmelding}</p>
     </div>`;
 }
+// Zelfde "3D" stoeltje (zit + rugleuning) als in het team-dashboard, i.p.v. het 🪑-emoji dat
+// er op zijn kop uitziet zodra een stoel 180° gedraaid is.
+function stoelIconHtml(rotatie){
+  return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
+    <span class="plattegrond__stoel-icoon__rug"></span>
+    <span class="plattegrond__stoel-icoon__zit"></span>
+  </span>`;
+}
 function renderTafelKiezen(){
   const RIJEN = 7, KOLOMMEN = 12;
   let cellenHtml = "";
@@ -247,7 +255,7 @@ function renderTafelKiezen(){
             🍽️<span class="plattegrond__nr">${obj.nummer||''}</span>
           </button>`;
       } else if(obj.type === "stoel"){
-        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel">🪑</div>`;
+        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel">${stoelIconHtml(obj.rotatie)}</div>`;
       } else {
         cellenHtml += `<div class="plattegrond__cel"></div>`;
       }
