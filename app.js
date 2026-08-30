@@ -75,6 +75,7 @@ const state = {
   foutmelding: "",
   nieuwProductEmoji: "🍽️",
   emojiPickerOpen: false,
+  bewerkMenuId: null,          // id van het product dat nu bewerkt wordt in Instellingen > Producten, of null
 };
 
 const MERKNAAM = "Restaurants";
@@ -628,6 +629,36 @@ function menuItemVerwijderen(id){
 function menuItemUitverkochtWijzigen(id, waarde){
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id + "/uitverkocht").set(!!waarde);
 }
+function menuItemBewerkStarten(id){
+  const item = state.menu[id];
+  if(!item) return;
+  state.bewerkMenuId = id;
+  state.nieuwProductEmoji = item.emoji || "🍽️";
+  state.emojiPickerOpen = false;
+  render();
+}
+function menuItemBewerkAnnuleren(){
+  state.bewerkMenuId = null;
+  state.nieuwProductEmoji = "🍽️";
+  render();
+}
+function menuItemBewerkOpslaan(id, naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
+  naam = (naam || "").trim();
+  if(!naam || !prijs || !categorie) return;
+  db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).update({
+    naam: naam,
+    prijs: parseFloat(prijs.replace(",", ".")) || 0,
+    categorie: categorie,
+    emoji: emoji || "🍽️",
+    ijsKeuze: !!ijsKeuze,
+    slagroomKeuze: !!slagroomKeuze,
+    glasKeuze: !!glasKeuze,
+  }).then(() => {
+    state.bewerkMenuId = null;
+    state.nieuwProductEmoji = "🍽️";
+    render();
+  });
+}
 
 // ---------- categorieën (aan te maken in Instellingen > Producten, te kiezen per product) ----------
 function categorieenGesorteerd(){
@@ -824,9 +855,13 @@ function beheerRestaurantVerwijderen(code){
   const naam = gegevens ? gegevens.naam : code;
   if(!confirm(`Restaurant "${naam}" (${code}) volledig verwijderen? Dit verwijdert al het menu, alle bestellingen en de hele historie, en kan niet ongedaan gemaakt worden.`)) return;
   if(state.beheerBezoekModus && state.restaurantCode === code) beheerRestaurantVerlaten(false);
+  // Meteen lokaal uit de lijst halen en renderen — niet wachten tot de server de verwijdering
+  // heeft bevestigd, anders blijft het restaurant nog even (of bij een tragere verbinding
+  // duidelijk merkbaar) in de lijst staan terwijl het al "weg" zou moeten zijn.
+  delete state.alleRestaurants[code];
+  render();
   db.ref("restaurants/" + code).remove().then(() => {
     toonToast("Restaurant verwijderd");
-    render();
   });
 }
 // Stuurt een waarschuwing naar één specifiek restaurant — zichtbaar als banner boven aan hun
@@ -1661,16 +1696,18 @@ function renderInstellingenProducten(){
   const categorieLijstHtml = categorieenArr.length ? categorieenArr.map(([id,c]) => `
     <span class="categorie-chip">${c.naam}<button type="button" class="categorie-chip__x" data-action="categorie-verwijder" data-id="${id}" title="Categorie verwijderen">✕</button></span>
   `).join("") : `<div class="leeg">Nog geen categorieën. Maak er hieronder een aan.</div>`;
-  const categorieOptiesHtml = categorieenArr.map(([,c]) => `<option value="${c.naam}">${c.naam}</option>`).join("");
 
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li>
       <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.glasKeuze?' <span class="cat">🥂 glas</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
       <span style="display:flex; align-items:center; gap:10px;">
         <span>${euro(i.prijs)}</span>
+        <button class="verwijder-x" data-action="menu-bewerken" data-id="${id}" title="Bewerken">✎</button>
         <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
       </span>
     </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
+
+  const bewerkItem = state.bewerkMenuId ? state.menu[state.bewerkMenuId] : null;
 
   const emojiGrid = state.emojiPickerOpen ? `
     <div class="emoji-grid">
@@ -1694,30 +1731,31 @@ function renderInstellingenProducten(){
     </div>
 
     <div class="instel-blok">
-      <div class="instel-blok__titel">Producten</div>
+      <div class="instel-blok__titel">${bewerkItem ? "Product bewerken" : "Producten"}</div>
       <div class="menu-form">
         <div class="emoji-kiezer">
           <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
           ${emojiGrid}
         </div>
-        <input id="menu-naam" placeholder="Productnaam">
-        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)">
+        <input id="menu-naam" placeholder="Productnaam" value="${bewerkItem ? bewerkItem.naam : ""}">
+        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)" value="${bewerkItem ? bewerkItem.prijs : ""}">
         <select id="menu-categorie" ${categorieenArr.length?"":"disabled"}>
-          ${categorieenArr.length ? categorieOptiesHtml : `<option value="">Maak eerst een categorie</option>`}
+          ${categorieenArr.length ? categorieenArr.map(([,c]) => `<option value="${c.naam}" ${bewerkItem && bewerkItem.categorie===c.naam?"selected":""}>${c.naam}</option>`).join("") : `<option value="">Maak eerst een categorie</option>`}
         </select>
-        <button class="btn btn--flame" data-action="menu-toevoegen" ${categorieenArr.length?"":"disabled"}>Toevoegen</button>
+        <button class="btn btn--flame" data-action="${bewerkItem?'menu-opslaan':'menu-toevoegen'}" data-id="${state.bewerkMenuId||""}" ${categorieenArr.length?"":"disabled"}>${bewerkItem?"💾 Opslaan":"Toevoegen"}</button>
+        ${bewerkItem ? `<button class="btn btn--ghost" data-action="menu-bewerk-annuleren">Annuleren</button>` : ""}
       </div>
       <div class="menu-form__opties">
         <label class="menu-form__optie">
-          <input type="checkbox" id="menu-ijskeuze">
+          <input type="checkbox" id="menu-ijskeuze" ${bewerkItem && bewerkItem.ijsKeuze?"checked":""}>
           🧊 IJskeuze aanbieden (ijsklontjes, ja/nee)
         </label>
         <label class="menu-form__optie">
-          <input type="checkbox" id="menu-slagroom">
+          <input type="checkbox" id="menu-slagroom" ${bewerkItem && bewerkItem.slagroomKeuze?"checked":""}>
           🥛 Slagroomkeuze aanbieden
         </label>
         <label class="menu-form__optie">
-          <input type="checkbox" id="menu-glaskeuze">
+          <input type="checkbox" id="menu-glaskeuze" ${bewerkItem && bewerkItem.glasKeuze?"checked":""}>
           🥂 Glaskeuze aanbieden (heeft de gast al een glas, ja/nee)
         </label>
       </div>
@@ -2043,6 +2081,20 @@ root.addEventListener("click", e => {
       render();
       break;
     case "menu-verwijder": menuItemVerwijderen(id); break;
+    case "menu-bewerken": menuItemBewerkStarten(id); break;
+    case "menu-bewerk-annuleren": menuItemBewerkAnnuleren(); break;
+    case "menu-opslaan":
+      menuItemBewerkOpslaan(
+        id,
+        document.getElementById("menu-naam").value,
+        document.getElementById("menu-prijs").value,
+        document.getElementById("menu-categorie").value,
+        state.nieuwProductEmoji,
+        document.getElementById("menu-ijskeuze").checked,
+        document.getElementById("menu-slagroom").checked,
+        document.getElementById("menu-glaskeuze").checked
+      );
+      break;
 
     case "categorie-toevoegen":
       categorieToevoegen(document.getElementById("nieuwe-categorie").value);
