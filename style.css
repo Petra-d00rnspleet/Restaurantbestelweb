@@ -1266,9 +1266,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .plattegrond__cel:not(:disabled):hover{ border-color:var(--flame); }
 .plattegrond__cel--tafel{ background:var(--panel-2); border-color:var(--flame-dark); position:relative; }
 .plattegrond__cel--stoel{
-  background:radial-gradient(circle at 35% 28%, rgba(169,113,60,.35), var(--panel-2) 72%);
+  background:var(--panel-2);
   border-color:var(--wood);
-  border-radius:50%;
+  border-radius:4px;
   box-shadow:inset 0 0 0 1px rgba(169,113,60,.3), 0 2px 6px rgba(0,0,0,.22);
   transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
 }
@@ -1308,18 +1308,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .plattegrond__stoel-icoon__poot{
   position:absolute;
   bottom:0;
-  width:2px; height:5px;
-  border-radius:0 0 1px 1px;
+  width:2px; height:6px;
+  border-radius:0;
   background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
   box-shadow:0 1px 1px rgba(0,0,0,.4);
 }
-.plattegrond__stoel-icoon__poot--l{ left:3px; }
-.plattegrond__stoel-icoon__poot--r{ right:3px; }
+.plattegrond__stoel-icoon__poot--l{ left:2px; }
+.plattegrond__stoel-icoon__poot--r{ right:2px; }
 .plattegrond__stoel-icoon__zit{
   position:absolute;
-  left:1px; right:1px; bottom:3px;
-  height:11px;
-  border-radius:3px;
+  left:0; right:0; bottom:4px;
+  height:8px;
+  border-radius:1px;
   background:
     repeating-linear-gradient(100deg, rgba(0,0,0,.08) 0 1.5px, transparent 1.5px 4px),
     linear-gradient(165deg, var(--wood-light) 0%, var(--wood) 55%, var(--wood-dark) 100%);
@@ -1330,9 +1330,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 .plattegrond__stoel-icoon__rug{
   position:absolute;
-  left:2px; right:2px; top:0;
-  height:10px;
-  border-radius:3px 3px 1px 1px;
+  left:3px; right:3px; top:0;
+  height:9px;
+  border-radius:1px 1px 0 0;
   background:
     repeating-linear-gradient(90deg, var(--wood-dark) 0 1.5px, var(--wood) 1.5px 4px, var(--wood-light) 4px 4.5px);
   box-shadow:
