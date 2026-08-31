@@ -68,6 +68,7 @@ const state = {
   alleRestaurants: {},          // alle restaurants in de database, alleen geladen als het beheerpaneel open is
   alleRestaurantsGeladen: false,
   sitebeheerPogingen: {},        // recente in- en mislukte inlogpogingen bij Sitebeheer (alleen geladen als het paneel open is)
+  feedback: {},                   // berichten van restaurant-eigenaren aan sitebeheer (alleen geladen als het paneel open is)
   beheerBezoekModus: false,     // ben je als beheerder een restaurant van iemand anders aan het bekijken/bewerken?
   winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
   bestelModus: "plattegrond",  // plattegrond | producten — welk scherm van Bestellen actief is (alleen relevant als er tafels zijn ingesteld)
@@ -704,16 +705,13 @@ function ledVerwijderen(ledId){
 // ---------- plattegrond (tafels & stoelen) ----------
 // Bouwt een klein "3D" stoeltje (zit + rugleuning) dat mee kan draaien met obj.rotatie, zonder
 // er ooit "op zijn kop" uit te zien zoals een geroteerd 🪑-emoji zou doen.
-// Bouwt een klein "3D" stoeltje van opzij (rugleuning + zit + 4 poten) dat mee kan draaien met
-// obj.rotatie, zonder er ooit "op zijn kop" uit te zien zoals een geroteerd 🪑-emoji zou doen.
+// Bouwt een klein houten stoeltje van bovenaf (zit + rugleuning-kapje) — net als een echt
+// plattegrond-symbool — dat mee kan draaien met obj.rotatie, zonder er ooit "op zijn kop" uit
+// te zien zoals een geroteerd 🪑-emoji zou doen.
 function stoelIconHtml(rotatie){
   return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
-    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--achter-l"></span>
-    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--achter-r"></span>
     <span class="plattegrond__stoel-icoon__rug"></span>
     <span class="plattegrond__stoel-icoon__zit"></span>
-    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--voor-l"></span>
-    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--voor-r"></span>
   </span>`;
 }
 function plattegrondCelKlikken(cel){
@@ -787,6 +785,7 @@ function beheerPaneelOpenen(){
   if(state.beheerderActief){
     alleRestaurantsLuisteren();
     sitebeheerPogingenLuisteren();
+    feedbackLuisteren();
   }
   render();
 }
@@ -828,9 +827,11 @@ function beheerderUitloggen(){
   auth.signOut();
   db.ref("restaurants").off();
   db.ref("sitebeheer_pogingen").off();
+  db.ref("feedback").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
   state.sitebeheerPogingen = {};
+  state.feedback = {};
   if(state.beheerBezoekModus) beheerRestaurantVerlaten(false);
   state.beheerPaneelOpen = false;
   render();
@@ -839,9 +840,11 @@ function beheerPaneelSluiten(){
   if(state.beheerBezoekModus){ beheerRestaurantVerlaten(false); }
   db.ref("restaurants").off();
   db.ref("sitebeheer_pogingen").off();
+  db.ref("feedback").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
   state.sitebeheerPogingen = {};
+  state.feedback = {};
   state.beheerPaneelOpen = false;
   render();
 }
@@ -859,6 +862,38 @@ function sitebeheerPogingenLuisteren(){
     state.sitebeheerPogingen = snap.val() || {};
     render();
   });
+}
+function sitebeheerPogingVerwijderen(id){
+  db.ref("sitebeheer_pogingen/" + id).remove();
+}
+// Stuurt een bericht van een restaurant-eigenaar naar sitebeheer (bijv. "ik zou graag X willen").
+// Dit werkt zonder inloggen — net als de rest van de app voor teamleden — en komt terecht in een
+// apart, alleen-voor-ingelogde-beheerders-leesbaar deel van de database (zie readme.md).
+function feedbackVersturen(tekst){
+  tekst = (tekst || "").trim();
+  if(!tekst) return;
+  const eigenLid = state.leden[state.ledId];
+  db.ref("feedback").push({
+    restaurantCode: state.restaurantCode,
+    restaurantNaam: state.restaurantNaam,
+    afzender: (eigenLid && eigenLid.naam) || state.gebruikersNaam || "(onbekend)",
+    tekst: tekst,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => {
+    const veld = document.getElementById("feedback-tekst");
+    if(veld) veld.value = "";
+    toonToast("Bericht verstuurd naar sitebeheer");
+  });
+}
+// Luistert live naar de laatste 100 feedback-berichten, alleen zolang het beheerpaneel open is.
+function feedbackLuisteren(){
+  db.ref("feedback").limitToLast(100).on("value", snap => {
+    state.feedback = snap.val() || {};
+    render();
+  });
+}
+function feedbackVerwijderen(id){
+  db.ref("feedback/" + id).remove();
 }
 // Als beheerder een restaurant van iemand anders openen — met volledige rechten, zonder
 // dat dit iets aan je eigen apparaat-instellingen (localStorage) verandert.
@@ -1294,14 +1329,28 @@ function renderBeheerPaneel(){
     </li>`;
   }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
 
+  const feedbackArr = Object.entries(state.feedback || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
+  const feedbackHtml = feedbackArr.length ? feedbackArr.map(([id,f]) => {
+    const datum = f.tijdstip ? new Date(f.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    return `<li>
+      <div>
+        <span class="update-lijst__datum">${datum}</span>
+        <span class="update-lijst__titel">${f.afzender || "(onbekend)"} — ${f.restaurantNaam || "?"} (${f.restaurantCode || "?"})</span>
+        <span>${f.tekst}</span>
+      </div>
+      <button class="verwijder-x" data-action="feedback-verwijderen" data-id="${id}" title="Verwerkt, wegklikken">✕</button>
+    </li>`;
+  }).join("") : `<div class="leeg">Nog geen berichten van eigenaren ontvangen.</div>`;
+
   const pogingenArr = Object.entries(state.sitebeheerPogingen || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const pogingenHtml = pogingenArr.length ? pogingenArr.map(([,p]) => {
+  const pogingenHtml = pogingenArr.length ? pogingenArr.map(([id,p]) => {
     const datum = p.tijdstip ? new Date(p.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
         <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — <strong>${p.naam || "(geen naam ingevuld)"}</strong> (${p.email || "(leeg)"})</span>
       </div>
+      <button class="verwijder-x" data-action="poging-verwijder" data-id="${id}" title="Wegklikken">✕</button>
     </li>`;
   }).join("") : `<div class="leeg">Nog geen inlogpogingen geregistreerd.</div>`;
 
@@ -1320,6 +1369,12 @@ function renderBeheerPaneel(){
         <h2 class="view-titel">Alle restaurants</h2>
         <div class="instel-blok">
           <div class="beheer-rest-lijst">${restaurantsHtml}</div>
+        </div>
+
+        <h2 class="view-titel">💬 Feedback van eigenaren</h2>
+        <div class="instel-blok">
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Berichten die restaurant-eigenaren rechtstreeks vanuit hun Instellingen naar jou hebben verstuurd.</p>
+          <ul class="update-lijst">${feedbackHtml}</ul>
         </div>
 
         <h2 class="view-titel">🔐 Inlogpogingen</h2>
@@ -1761,6 +1816,14 @@ function renderInstellingenAlgemeen(){
       <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
     </div>
 
+    ${isEigenaar ? `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">💬 Bericht naar sitebeheer</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Wil je iets aan ${MERKNAAM} verbeterd zien? Stuur het rechtstreeks naar de bouwer van de site.</p>
+      <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
+      <button class="btn btn--flame" style="margin-top:10px;" data-action="feedback-versturen">Versturen</button>
+    </div>` : ""}
+
     <div class="instel-blok">
       <div class="instel-blok__titel">Dit restaurant</div>
       ${state.beheerBezoekModus ? `
@@ -2109,6 +2172,9 @@ root.addEventListener("click", e => {
       );
       break;
     case "site-update-verwijder": siteUpdateVerwijderen(id); break;
+    case "poging-verwijder": sitebeheerPogingVerwijderen(id); break;
+    case "feedback-versturen": feedbackVersturen(document.getElementById("feedback-tekst").value); break;
+    case "feedback-verwijderen": feedbackVerwijderen(id); break;
     case "site-update-bewerken": siteUpdateBewerkStarten(id); break;
     case "site-update-bewerk-annuleren": siteUpdateBewerkAnnuleren(); break;
     case "site-update-opslaan":
@@ -2239,7 +2305,7 @@ db.ref("site_updates").on("value", snap => {
 auth.onAuthStateChanged(gebruiker => {
   state.beheerderActief = !!gebruiker;
   state.beheerFoutmelding = "";
-  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); }
+  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); }
   render();
 });
 render();
