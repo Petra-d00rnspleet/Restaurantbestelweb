@@ -1302,23 +1302,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .plattegrond__stoel-icoon{
   position:relative;
   display:inline-block;
-  width:20px; height:23px;
+  width:22px; height:29px;
   transition:transform .15s ease;
 }
 .plattegrond__stoel-icoon__poot{
   position:absolute;
-  bottom:0;
-  width:2px; height:6px;
+  top:20px;
+  width:2px;
   border-radius:0;
   background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
   box-shadow:0 1px 1px rgba(0,0,0,.4);
 }
-.plattegrond__stoel-icoon__poot--l{ left:2px; }
-.plattegrond__stoel-icoon__poot--r{ right:2px; }
+/* Achterpoten: dichter naar het midden en korter, zodat ze verder weg lijken te staan. */
+.plattegrond__stoel-icoon__poot--achter-l{ left:6px; height:6px; }
+.plattegrond__stoel-icoon__poot--achter-r{ right:6px; height:6px; }
+/* Voorpoten: breder uit elkaar en langer, komen tot onderaan het icoon — perspectief van opzij. */
+.plattegrond__stoel-icoon__poot--voor-l{ left:2px; height:9px; }
+.plattegrond__stoel-icoon__poot--voor-r{ right:2px; height:9px; }
 .plattegrond__stoel-icoon__zit{
   position:absolute;
-  left:0; right:0; bottom:4px;
-  height:8px;
+  left:0; right:0; top:14px;
+  height:7px;
   border-radius:1px;
   background:
     repeating-linear-gradient(100deg, rgba(0,0,0,.08) 0 1.5px, transparent 1.5px 4px),
@@ -1330,8 +1334,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 .plattegrond__stoel-icoon__rug{
   position:absolute;
-  left:3px; right:3px; top:0;
-  height:9px;
+  left:1px; right:1px; top:0;
+  height:15px;
   border-radius:1px 1px 0 0;
   background:
     repeating-linear-gradient(90deg, var(--wood-dark) 0 1.5px, var(--wood) 1.5px 4px, var(--wood-light) 4px 4.5px);
