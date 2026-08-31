@@ -1501,9 +1501,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   margin:10px 0;
 }
 .qr-vak img{ display:block; border-radius:2px; }
-.qr-link-tonen{ display:flex; gap:8px; align-items:center; }
-.qr-link-tonen input{
-  flex:1;
+.qr-link-tonen{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.qr-link-tonen input{ flex:1; min-width:160px;
   padding:8px 10px;
   background:var(--panel-2);
   border:1px solid var(--line);
