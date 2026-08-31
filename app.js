@@ -158,9 +158,19 @@ function mijnRestaurantVerwijderenUitLijst(code){
   state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
 }
+const MAX_SPATIES_RESTAURANTNAAM = 3;
+// Een restaurantnaam mag maximaal 3 spaties bevatten (dus maximaal 4 woorden) — voorkomt
+// per ongeluk een hele zin als "naam".
+function restaurantNaamHeeftTeveelSpaties(naam){
+  return ((naam || "").match(/ /g) || []).length > MAX_SPATIES_RESTAURANTNAAM;
+}
 function restaurantNaamWijzigen(nieuweNaam){
   nieuweNaam = (nieuweNaam || "").trim();
   if(!nieuweNaam) return;
+  if(restaurantNaamHeeftTeveelSpaties(nieuweNaam)){
+    toonToast(`Een restaurantnaam mag maximaal ${MAX_SPATIES_RESTAURANTNAAM} spaties bevatten.`);
+    return;
+  }
   db.ref("restaurants/" + state.restaurantCode + "/naam").set(nieuweNaam).then(() => {
     toonToast("Restaurantnaam bijgewerkt");
   });
@@ -406,6 +416,10 @@ function restaurantMaken(naam, eigenNaam){
     render(); return;
   }
   if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
+  if(restaurantNaamHeeftTeveelSpaties(naam)){
+    state.foutmelding = `Een restaurantnaam mag maximaal ${MAX_SPATIES_RESTAURANTNAAM} spaties bevatten.`;
+    render(); return;
+  }
   if(!eigenNaam){ state.foutmelding = "Vul je eigen naam in."; render(); return; }
   const code = genereerCode();
   db.ref("restaurants/" + code).set({
@@ -1812,6 +1826,7 @@ function renderInstellingenAlgemeen(){
       <div class="qr-link-tonen">
         <input readonly value="${zelfBestelUrl(state.restaurantCode)}">
         <button class="btn btn--ghost btn--sm" data-action="qr-link-kopieren">Link kopiëren</button>
+        <a class="btn btn--ghost btn--sm" href="${zelfBestelUrl(state.restaurantCode)}" target="_blank" rel="noopener">Link openen ↗</a>
       </div>
       <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
     </div>
@@ -1830,13 +1845,13 @@ function renderInstellingenAlgemeen(){
         <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je bekijkt dit restaurant als beheerder — dit apparaat is er geen lid van.</p>
         <button class="btn btn--ghost" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>
       ` : isEigenaar ? `
-        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen haalt dit restaurant meteen uit je lijst op dit apparaat — je hebt daarna de code weer nodig om terug te komen. Verwijderen maakt het restaurant (menu, bestellingen en historie) meteen en definitief weg, voor iedereen.</p>
+        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen gaat terug naar het startscherm — dit restaurant blijft gewoon in je lijst staan. Verwijderen maakt het restaurant (menu, bestellingen en historie) meteen en definitief weg, voor iedereen.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel restaurant</button>
           <button class="btn btn--ghost" style="border-color:var(--ember); color:var(--ember);" data-action="restaurant-verwijderen-eigenaar">🗑️ Restaurant verwijderen</button>
         </div>
       ` : `
-        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen of verlaten haalt dit restaurant meteen uit je lijst op dit apparaat. Verlaten verwijdert ook je teamlid-account — je hebt daarna een nieuwe code van de eigenaar nodig om er weer bij te komen.</p>
+        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen gaat terug naar het startscherm — dit restaurant blijft gewoon in je lijst staan. Verlaten haalt het wél uit je lijst en verwijdert ook je teamlid-account — je hebt daarna een nieuwe code van de eigenaar nodig om er weer bij te komen.</p>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel restaurant</button>
           <button class="btn btn--ghost" style="border-color:var(--ember); color:var(--ember);" data-action="restaurant-verlaten-lid">🚪 Restaurant verlaten</button>
@@ -2128,7 +2143,6 @@ root.addEventListener("click", e => {
       toonToast("Code gekopieerd: " + state.restaurantCode);
       break;
     case "terug-naar-start":
-      if(state.restaurantCode) mijnRestaurantVerwijderenUitLijst(state.restaurantCode);
       verlaatHuidigRestaurant();
       break;
     case "restaurant-verwijderen-eigenaar": restaurantVerwijderenDoorEigenaar(); break;
