@@ -74,6 +74,7 @@ Onderaan het startscherm (en onderaan Instellingen, als je al in een restaurant 
 - Elk restaurant **bezoeken** — je stapt dan met volledige rechten in dat restaurant (Bestellen, Keuken, Bezorgen, Historie, Voorraad én Instellingen), zonder dat dit iets verandert aan je eigen apparaat: jouw eigen restaurantcode in localStorage blijft ongemoeid, en je kunt met "← Terug naar beheerpaneel" weer terug.
 - Elk restaurant **volledig verwijderen** (inclusief menu, bestellingen en historie) — dit kan niet ongedaan gemaakt worden.
 - De **systeemupdates** schrijven en verwijderen (titel + tekst) — dit stond eerder in het Instellingen-tabblad van elk restaurant, maar staat nu alleen nog hier.
+- De **inlogpogingen** van de laatste tijd zien (gelukt én mislukt, met tijdstip en het ingevoerde e-mailadres) — zo zie je hier zelf of iemand geprobeerd heeft binnen te komen. Na 3 mislukte pogingen achter elkaar wordt inloggen op dat apparaat/browser 15 minuten geblokkeerd (het inlogformulier toont dan hoelang nog); dit is een lokale blokkade per apparaat, dus geen vervanging voor een sterk wachtwoord.
 
 Dit werkt met een **echt account via Firebase Authentication** — er staat geen wachtwoord meer ergens in de broncode. Zo stel je dat in:
 
@@ -129,6 +130,10 @@ Ga naar **Realtime Database → Regels** en zet:
     "site_updates": {
       ".read": true,
       ".write": "auth != null"
+    },
+    "sitebeheer_pogingen": {
+      ".read": "auth != null",
+      ".write": true
     }
   }
 }
@@ -138,6 +143,7 @@ Wat dit doet:
 - Gewone gasten/teamleden kunnen, zoals voorheen, gewoon bij één specifiek restaurant via de code (`restaurants/K3F7Q/...`) — dat blijft zonder inloggen werken, precies zoals de app dat gebruikt.
 - **Alle** restaurants tegelijk opvragen (`restaurants` zonder code — dat is wat het sitebeheer-paneel doet om de lijst te tonen) kan alleen nog met een geldige Firebase-inlogsessie (`auth != null`). Zonder in te loggen krijg je die lijst dus nergens meer te zien, ook niet door rechtstreeks met de database te praten.
 - Systeemupdates blijven voor iedereen leesbaar, maar alleen ingelogde beheerders kunnen ze plaatsen/verwijderen.
+- Elke inlogpoging bij Sitebeheer (gelukt én mislukt) wordt weggeschreven naar `sitebeheer_pogingen` — dat moet zonder inloggen kunnen schrijven (iemand die nog niet is ingelogd, is per definitie degene die een poging doet), maar **lezen** van die lijst kan alleen met een geldige inlogsessie. Zo kun jij als eigenaar zien of iemand geprobeerd heeft binnen te komen, zonder dat een buitenstaander die lijst ook kan inzien.
 
 ⚠️ Let op: de restaurantcode (`$code`) zelf werkt nog steeds als een soort "wachtwoord" voor dat ene restaurant — wie de code weet of raadt, kan dat restaurant lezen/wijzigen. Dat is een bewuste, lichte keuze van dit project (net als bij een tafelbon-code) en geen verkeerde configuratie; alleen het **sitebeheer-gedeelte** (alle restaurants + systeemupdates) is nu met een echt account afgeschermd.
 
