@@ -704,10 +704,16 @@ function ledVerwijderen(ledId){
 // ---------- plattegrond (tafels & stoelen) ----------
 // Bouwt een klein "3D" stoeltje (zit + rugleuning) dat mee kan draaien met obj.rotatie, zonder
 // er ooit "op zijn kop" uit te zien zoals een geroteerd 🪑-emoji zou doen.
+// Bouwt een klein "3D" stoeltje van opzij (rugleuning + zit + 4 poten) dat mee kan draaien met
+// obj.rotatie, zonder er ooit "op zijn kop" uit te zien zoals een geroteerd 🪑-emoji zou doen.
 function stoelIconHtml(rotatie){
   return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
+    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--achter-l"></span>
+    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--achter-r"></span>
     <span class="plattegrond__stoel-icoon__rug"></span>
     <span class="plattegrond__stoel-icoon__zit"></span>
+    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--voor-l"></span>
+    <span class="plattegrond__stoel-icoon__poot plattegrond__stoel-icoon__poot--voor-r"></span>
   </span>`;
 }
 function plattegrondCelKlikken(cel){
@@ -767,8 +773,9 @@ function beheerMinutenTotOntgrendeld(){
 }
 // Logt élke inlogpoging (gelukt én mislukt) in de database, zodat jij als eigenaar in
 // Sitebeheer zelf kunt zien of iemand geprobeerd heeft binnen te komen.
-function beheerPogingLoggen(email, succes){
+function beheerPogingLoggen(naam, email, succes){
   db.ref("sitebeheer_pogingen").push({
+    naam: naam || "(geen naam ingevuld)",
     email: email || "(leeg)",
     succes: !!succes,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
@@ -783,7 +790,8 @@ function beheerPaneelOpenen(){
   }
   render();
 }
-function beheerInloggen(email, wachtwoord){
+function beheerInloggen(naam, email, wachtwoord){
+  naam = (naam || "").trim();
   email = (email || "").trim();
   wachtwoord = wachtwoord || "";
   const minutenOver = beheerMinutenTotOntgrendeld();
@@ -792,17 +800,18 @@ function beheerInloggen(email, wachtwoord){
     render();
     return;
   }
+  if(!naam){ state.beheerFoutmelding = "Vul je naam in."; render(); return; }
   if(!email || !wachtwoord){ state.beheerFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
   state.beheerFoutmelding = "Bezig met inloggen…";
   render();
   auth.signInWithEmailAndPassword(email, wachtwoord)
     .then(() => {
       beheerPogingenOpslaan({ aantal: 0, geblokkeerdTot: 0 });
-      beheerPogingLoggen(email, true);
+      beheerPogingLoggen(naam, email, true);
       // state.beheerderActief wordt door onAuthStateChanged hieronder op true gezet, incl. render()
     })
     .catch(() => {
-      beheerPogingLoggen(email, false);
+      beheerPogingLoggen(naam, email, false);
       const status = beheerPogingenStatus();
       const nieuwAantal = (status.aantal || 0) + 1;
       if(nieuwAantal >= BEHEER_MAX_POGINGEN){
@@ -1196,8 +1205,10 @@ function renderBeheerPaneel(){
           <div class="landing__divider"><span class="landing__diamond"></span></div>
         </div>
         <div class="form-card">
+          <label class="form-card__label">Jouw naam</label>
+          <input id="beheer-naam" type="text" placeholder="Bijv. Sara" ${geblokkeerd?"disabled":"autofocus"}>
           <label class="form-card__label">E-mailadres</label>
-          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":"autofocus"}>
+          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":""}>
           <label class="form-card__label">Wachtwoord</label>
           <input id="beheer-wachtwoord" type="password" placeholder="••••••••" ${geblokkeerd?"disabled":""}>
           ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : geblokkeerd ? `<div class="fout">Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.</div>` : ""}
@@ -1207,9 +1218,11 @@ function renderBeheerPaneel(){
       </div>`;
     if(geblokkeerd) return;
     const verstuur = () => beheerInloggen(
+      document.getElementById("beheer-naam").value,
       document.getElementById("beheer-email").value,
       document.getElementById("beheer-wachtwoord").value
     );
+    document.getElementById("beheer-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     document.getElementById("beheer-email").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     document.getElementById("beheer-wachtwoord").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     return;
@@ -1287,7 +1300,7 @@ function renderBeheerPaneel(){
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
-        <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — ${p.email || "(leeg)"}</span>
+        <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — <strong>${p.naam || "(geen naam ingevuld)"}</strong> (${p.email || "(leeg)"})</span>
       </div>
     </li>`;
   }).join("") : `<div class="leeg">Nog geen inlogpogingen geregistreerd.</div>`;
@@ -2077,6 +2090,7 @@ root.addEventListener("click", e => {
     case "beheer-sluiten": beheerPaneelSluiten(); break;
     case "beheer-inloggen":
       beheerInloggen(
+        document.getElementById("beheer-naam").value,
         document.getElementById("beheer-email").value,
         document.getElementById("beheer-wachtwoord").value
       );
