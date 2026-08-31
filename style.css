@@ -1296,51 +1296,38 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 
 .plattegrond-uitleg{ color:var(--text-dim); font-size:.85rem; margin-top:-8px; }
-/* Houten stoeltje (zit + spijlen-rugleuning + pootjes) i.p.v. het 🪑-emoji: een emoji staat er
-   op zijn kop uit zodra je 'm 180° draait, dit vormpje niet — de rugleuning laat gewoon zien
-   waar de stoel naartoe kijkt, in elke rotatiestand. */
+/* Houten stoeltje van bovenaf (net als een echt plattegrond-symbool: een vierkante zit met een
+   rond "kapje" als rugleuning) i.p.v. het 🪑-emoji: een emoji staat er op zijn kop uit zodra je
+   'm 180° draait, dit vormpje niet — het kapje laat gewoon zien waar de stoel naartoe kijkt, in
+   elke rotatiestand. Geen pootjes: die zie je bij een bovenaanzicht sowieso niet. */
 .plattegrond__stoel-icoon{
   position:relative;
   display:inline-block;
-  width:22px; height:29px;
+  width:21px; height:23px;
   transition:transform .15s ease;
 }
-.plattegrond__stoel-icoon__poot{
-  position:absolute;
-  top:20px;
-  width:2px;
-  border-radius:0;
-  background:linear-gradient(180deg, var(--wood) 0%, var(--wood-dark) 100%);
-  box-shadow:0 1px 1px rgba(0,0,0,.4);
-}
-/* Achterpoten: dichter naar het midden en korter, zodat ze verder weg lijken te staan. */
-.plattegrond__stoel-icoon__poot--achter-l{ left:6px; height:6px; }
-.plattegrond__stoel-icoon__poot--achter-r{ right:6px; height:6px; }
-/* Voorpoten: breder uit elkaar en langer, komen tot onderaan het icoon — perspectief van opzij. */
-.plattegrond__stoel-icoon__poot--voor-l{ left:2px; height:9px; }
-.plattegrond__stoel-icoon__poot--voor-r{ right:2px; height:9px; }
 .plattegrond__stoel-icoon__zit{
   position:absolute;
-  left:0; right:0; top:14px;
-  height:7px;
-  border-radius:1px;
+  left:0; right:0; bottom:0;
+  height:16px;
+  border-radius:3px;
   background:
     repeating-linear-gradient(100deg, rgba(0,0,0,.08) 0 1.5px, transparent 1.5px 4px),
     linear-gradient(165deg, var(--wood-light) 0%, var(--wood) 55%, var(--wood-dark) 100%);
   box-shadow:
-    0 3px 4px rgba(0,0,0,.4),
+    0 2px 3px rgba(0,0,0,.35),
     inset 0 1px 1px rgba(255,220,180,.4),
     inset 0 -2px 3px rgba(0,0,0,.3);
 }
 .plattegrond__stoel-icoon__rug{
   position:absolute;
-  left:1px; right:1px; top:0;
-  height:15px;
-  border-radius:1px 1px 0 0;
+  left:2px; right:2px; top:0;
+  height:9px;
+  border-radius:6px 6px 2px 2px;
   background:
     repeating-linear-gradient(90deg, var(--wood-dark) 0 1.5px, var(--wood) 1.5px 4px, var(--wood-light) 4px 4.5px);
   box-shadow:
-    0 2px 3px rgba(0,0,0,.35),
+    0 1px 2px rgba(0,0,0,.3),
     inset 0 1px 1px rgba(255,220,180,.3);
 }
 .plattegrond-legenda{
