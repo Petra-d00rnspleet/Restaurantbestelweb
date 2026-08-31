@@ -67,6 +67,7 @@ const state = {
   beheerFoutmelding: "",
   alleRestaurants: {},          // alle restaurants in de database, alleen geladen als het beheerpaneel open is
   alleRestaurantsGeladen: false,
+  sitebeheerPogingen: {},        // recente in- en mislukte inlogpogingen bij Sitebeheer (alleen geladen als het paneel open is)
   beheerBezoekModus: false,     // ben je als beheerder een restaurant van iemand anders aan het bekijken/bewerken?
   winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
   bestelModus: "plattegrond",  // plattegrond | producten — welk scherm van Bestellen actief is (alleen relevant als er tafels zijn ingesteld)
@@ -744,32 +745,83 @@ function plattegrondCelKlikken(cel){
 // bij Firebase zelf, niet in dit bestand — dus niet te vinden via "Weergave broncode".
 // De écht gevoelige actie (alle restaurants tegelijk opvragen) is bovendien met databaseregels
 // afgeschermd tot ingelogde gebruikers — zie de regels in readme.md.
+const BEHEER_MAX_POGINGEN = 3;
+const BEHEER_LOCKOUT_MINUTEN = 15;
+
+// Bijhouden van mislukte inlogpogingen bij Sitebeheer, lokaal per apparaat/browser — na
+// BEHEER_MAX_POGINGEN mislukte pogingen achter elkaar wordt inloggen hier tijdelijk geblokkeerd.
+function beheerPogingenStatus(){
+  try {
+    return JSON.parse(localStorage.getItem("ticket_beheer_pogingen")) || { aantal: 0, geblokkeerdTot: 0 };
+  } catch(e){
+    return { aantal: 0, geblokkeerdTot: 0 };
+  }
+}
+function beheerPogingenOpslaan(status){
+  localStorage.setItem("ticket_beheer_pogingen", JSON.stringify(status));
+}
+function beheerMinutenTotOntgrendeld(){
+  const status = beheerPogingenStatus();
+  if(!status.geblokkeerdTot || status.geblokkeerdTot <= Date.now()) return 0;
+  return Math.ceil((status.geblokkeerdTot - Date.now()) / 60000);
+}
+// Logt élke inlogpoging (gelukt én mislukt) in de database, zodat jij als eigenaar in
+// Sitebeheer zelf kunt zien of iemand geprobeerd heeft binnen te komen.
+function beheerPogingLoggen(email, succes){
+  db.ref("sitebeheer_pogingen").push({
+    email: email || "(leeg)",
+    succes: !!succes,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
 function beheerPaneelOpenen(){
   state.beheerPaneelOpen = true;
   state.beheerFoutmelding = "";
-  if(state.beheerderActief) alleRestaurantsLuisteren();
+  if(state.beheerderActief){
+    alleRestaurantsLuisteren();
+    sitebeheerPogingenLuisteren();
+  }
   render();
 }
 function beheerInloggen(email, wachtwoord){
   email = (email || "").trim();
   wachtwoord = wachtwoord || "";
+  const minutenOver = beheerMinutenTotOntgrendeld();
+  if(minutenOver > 0){
+    state.beheerFoutmelding = `Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`;
+    render();
+    return;
+  }
   if(!email || !wachtwoord){ state.beheerFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
   state.beheerFoutmelding = "Bezig met inloggen…";
   render();
   auth.signInWithEmailAndPassword(email, wachtwoord)
     .then(() => {
+      beheerPogingenOpslaan({ aantal: 0, geblokkeerdTot: 0 });
+      beheerPogingLoggen(email, true);
       // state.beheerderActief wordt door onAuthStateChanged hieronder op true gezet, incl. render()
     })
     .catch(() => {
-      state.beheerFoutmelding = "Onjuiste inloggegevens.";
+      beheerPogingLoggen(email, false);
+      const status = beheerPogingenStatus();
+      const nieuwAantal = (status.aantal || 0) + 1;
+      if(nieuwAantal >= BEHEER_MAX_POGINGEN){
+        beheerPogingenOpslaan({ aantal: 0, geblokkeerdTot: Date.now() + BEHEER_LOCKOUT_MINUTEN * 60000 });
+        state.beheerFoutmelding = `Onjuiste inloggegevens. Te veel mislukte pogingen — probeer het over ${BEHEER_LOCKOUT_MINUTEN} minuten opnieuw.`;
+      } else {
+        beheerPogingenOpslaan({ aantal: nieuwAantal, geblokkeerdTot: 0 });
+        state.beheerFoutmelding = `Onjuiste inloggegevens (poging ${nieuwAantal} van ${BEHEER_MAX_POGINGEN}).`;
+      }
       render();
     });
 }
 function beheerderUitloggen(){
   auth.signOut();
   db.ref("restaurants").off();
+  db.ref("sitebeheer_pogingen").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
+  state.sitebeheerPogingen = {};
   if(state.beheerBezoekModus) beheerRestaurantVerlaten(false);
   state.beheerPaneelOpen = false;
   render();
@@ -777,8 +829,10 @@ function beheerderUitloggen(){
 function beheerPaneelSluiten(){
   if(state.beheerBezoekModus){ beheerRestaurantVerlaten(false); }
   db.ref("restaurants").off();
+  db.ref("sitebeheer_pogingen").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
+  state.sitebeheerPogingen = {};
   state.beheerPaneelOpen = false;
   render();
 }
@@ -787,6 +841,13 @@ function alleRestaurantsLuisteren(){
   db.ref("restaurants").on("value", snap => {
     state.alleRestaurants = snap.val() || {};
     state.alleRestaurantsGeladen = true;
+    render();
+  });
+}
+// Luistert live naar de laatste 50 inlogpogingen bij Sitebeheer, alleen zolang het paneel open is.
+function sitebeheerPogingenLuisteren(){
+  db.ref("sitebeheer_pogingen").limitToLast(50).on("value", snap => {
+    state.sitebeheerPogingen = snap.val() || {};
     render();
   });
 }
@@ -1125,6 +1186,8 @@ function renderLanding(){
 // ============================================================
 function renderBeheerPaneel(){
   if(!state.beheerderActief){
+    const minutenOver = beheerMinutenTotOntgrendeld();
+    const geblokkeerd = minutenOver > 0;
     root.innerHTML = `
       <div class="landing">
         <div class="landing__mark">
@@ -1134,14 +1197,15 @@ function renderBeheerPaneel(){
         </div>
         <div class="form-card">
           <label class="form-card__label">E-mailadres</label>
-          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" autofocus>
+          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":"autofocus"}>
           <label class="form-card__label">Wachtwoord</label>
-          <input id="beheer-wachtwoord" type="password" placeholder="••••••••">
-          ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : ""}
-          <button class="btn btn--flame btn--block" data-action="beheer-inloggen">Inloggen</button>
+          <input id="beheer-wachtwoord" type="password" placeholder="••••••••" ${geblokkeerd?"disabled":""}>
+          ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : geblokkeerd ? `<div class="fout">Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.</div>` : ""}
+          <button class="btn btn--flame btn--block" data-action="beheer-inloggen" ${geblokkeerd?"disabled":""}>Inloggen</button>
           <button class="terug-link" data-action="beheer-sluiten">← Terug</button>
         </div>
       </div>`;
+    if(geblokkeerd) return;
     const verstuur = () => beheerInloggen(
       document.getElementById("beheer-email").value,
       document.getElementById("beheer-wachtwoord").value
@@ -1217,6 +1281,17 @@ function renderBeheerPaneel(){
     </li>`;
   }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
 
+  const pogingenArr = Object.entries(state.sitebeheerPogingen || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
+  const pogingenHtml = pogingenArr.length ? pogingenArr.map(([,p]) => {
+    const datum = p.tijdstip ? new Date(p.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+    return `<li>
+      <div>
+        <span class="update-lijst__datum">${datum}</span>
+        <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — ${p.email || "(leeg)"}</span>
+      </div>
+    </li>`;
+  }).join("") : `<div class="leeg">Nog geen inlogpogingen geregistreerd.</div>`;
+
   root.innerHTML = `
     <div class="shell">
       <header class="topbar">
@@ -1232,6 +1307,12 @@ function renderBeheerPaneel(){
         <h2 class="view-titel">Alle restaurants</h2>
         <div class="instel-blok">
           <div class="beheer-rest-lijst">${restaurantsHtml}</div>
+        </div>
+
+        <h2 class="view-titel">🔐 Inlogpogingen</h2>
+        <div class="instel-blok">
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">De laatste 50 pogingen om bij Sitebeheer in te loggen — zo zie je hier ook mislukte pogingen van anderen. Na ${BEHEER_MAX_POGINGEN} mislukte pogingen achter elkaar wordt inloggen op dat apparaat ${BEHEER_LOCKOUT_MINUTEN} minuten geblokkeerd.</p>
+          <ul class="update-lijst">${pogingenHtml}</ul>
         </div>
 
         <h2 class="view-titel">Systeemupdates</h2>
@@ -2144,7 +2225,7 @@ db.ref("site_updates").on("value", snap => {
 auth.onAuthStateChanged(gebruiker => {
   state.beheerderActief = !!gebruiker;
   state.beheerFoutmelding = "";
-  if(gebruiker && state.beheerPaneelOpen) alleRestaurantsLuisteren();
+  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); }
   render();
 });
 render();
