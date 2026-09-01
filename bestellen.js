@@ -11,6 +11,7 @@ const db = firebase.database();
 const root = document.getElementById("app");
 
 const MERKNAAM = "Restaurants";
+const MAX_PRODUCTEN_PER_BESTELLING = 20; // max. totaal aantal producten (som van aantallen) in één bestelling
 
 // Statuslabels zoals de eigenaar ze voor gasten wil tonen — LET OP: dit is bewust geen
 // letterlijke/chronologische naamgeving (zie afspraak met de eigenaar: "nieuw" heet voor
@@ -149,8 +150,16 @@ function verbindenLuisteraars(){
 }
 
 // ---------- winkelwagen ----------
+// Telt het totaal aantal producten (som van alle aantallen) dat al in de winkelwagen zit.
+function gastWagenTotaalAantal(wagen){
+  return Object.values(wagen || {}).reduce((s, i) => s + (i.aantal || 0), 0);
+}
 function gastToevoegenAanWagen(id, item){
   if(!item) return;
+  if(gastWagenTotaalAantal(state.winkelwagen) >= MAX_PRODUCTEN_PER_BESTELLING){
+    toonToast(`Je kan maximaal ${MAX_PRODUCTEN_PER_BESTELLING} producten per bestelling bestellen.`);
+    return;
+  }
   if(state.winkelwagen[id]) state.winkelwagen[id].aantal += 1;
   else state.winkelwagen[id] = {
     naam:item.naam, prijs:item.prijs, aantal:1, notitie:"", emoji:item.emoji||"", categorie:item.categorie||"",
@@ -162,6 +171,10 @@ function gastToevoegenAanWagen(id, item){
 function gastWagenAantalWijzigen(id, delta){
   const item = state.winkelwagen[id];
   if(!item) return;
+  if(delta > 0 && gastWagenTotaalAantal(state.winkelwagen) >= MAX_PRODUCTEN_PER_BESTELLING){
+    toonToast(`Je kan maximaal ${MAX_PRODUCTEN_PER_BESTELLING} producten per bestelling bestellen.`);
+    return;
+  }
   item.aantal += delta;
   if(item.aantal <= 0) delete state.winkelwagen[id];
   render();
