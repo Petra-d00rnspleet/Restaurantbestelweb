@@ -160,17 +160,12 @@ function mijnRestaurantVerwijderenUitLijst(code){
   state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
 }
-const MAX_SPATIES_RESTAURANTNAAM = 3;
-// Een restaurantnaam mag maximaal 3 spaties bevatten (dus maximaal 4 woorden) — voorkomt
-// per ongeluk een hele zin als "naam".
-function restaurantNaamHeeftTeveelSpaties(naam){
-  return ((naam || "").match(/ /g) || []).length > MAX_SPATIES_RESTAURANTNAAM;
-}
+const MAX_LETTERS_RESTAURANTNAAM = 10;   // max. aantal tekens voor een restaurantnaam
 function restaurantNaamWijzigen(nieuweNaam){
   nieuweNaam = (nieuweNaam || "").trim();
   if(!nieuweNaam) return;
-  if(restaurantNaamHeeftTeveelSpaties(nieuweNaam)){
-    toonToast(`Een restaurantnaam mag maximaal ${MAX_SPATIES_RESTAURANTNAAM} spaties bevatten.`);
+  if(nieuweNaam.length > MAX_LETTERS_RESTAURANTNAAM){
+    toonToast(`Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.`);
     return;
   }
   db.ref("restaurants/" + state.restaurantCode + "/naam").set(nieuweNaam).then(() => {
@@ -418,8 +413,8 @@ function restaurantMaken(naam, eigenNaam){
     render(); return;
   }
   if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
-  if(restaurantNaamHeeftTeveelSpaties(naam)){
-    state.foutmelding = `Een restaurantnaam mag maximaal ${MAX_SPATIES_RESTAURANTNAAM} spaties bevatten.`;
+  if(naam.length > MAX_LETTERS_RESTAURANTNAAM){
+    state.foutmelding = `Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.`;
     render(); return;
   }
   if(!eigenNaam){ state.foutmelding = "Vul je eigen naam in."; render(); return; }
@@ -1225,7 +1220,8 @@ function renderLanding(){
         ${merk}
         <div class="form-card">
           <label class="form-card__label">Naam van je restaurant</label>
-          <input id="input-naam" type="text" placeholder="Bijv. De Gouden Pan" autofocus>
+          <input id="input-naam" type="text" placeholder="Bijv. GoudenPan" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" autofocus>
+          <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>
           <label class="form-card__label">Jouw naam</label>
           <input id="input-eigen-naam-maken" type="text" placeholder="Bijv. Sara">
           ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
@@ -1853,9 +1849,10 @@ function renderInstellingenAlgemeen(){
       <div class="instel-blok__titel">Restaurantnaam</div>
       ${heeftRecht('instellingen') ? `
         <div class="naam-wijzig-form">
-          <input id="restaurant-naam-invoer" value="${state.restaurantNaam}">
+          <input id="restaurant-naam-invoer" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" value="${state.restaurantNaam}">
           <button class="btn btn--flame btn--sm" data-action="naam-opslaan">Opslaan</button>
-        </div>` : `<div>${state.restaurantNaam}</div>`}
+        </div>
+        <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>` : `<div>${state.restaurantNaam}</div>`}
     </div>
 
     <div class="instel-blok">
