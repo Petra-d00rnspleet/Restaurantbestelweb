@@ -82,6 +82,8 @@ const state = {
 
 const MERKNAAM = "Restaurants";
 const MAX_RESTAURANTS_PER_PERSOON = 2;
+const MAX_PRODUCTEN_PER_BESTELLING = 20; // max. totaal aantal producten (som van aantallen) in één bestelling
+const MAX_LETTERS_PRODUCTNAAM = 10;      // max. aantal tekens voor een productnaam
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
@@ -627,9 +629,14 @@ function historieWissen(){
   db.ref("restaurants/" + state.restaurantCode + "/historie").remove();
 }
 function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
-  if(!naam.trim() || !prijs || !categorie) return;
+  naam = naam.trim();
+  if(!naam || !prijs || !categorie) return;
+  if(naam.length > MAX_LETTERS_PRODUCTNAAM){
+    toonToast(`Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.`);
+    return;
+  }
   db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
-    naam: naam.trim(),
+    naam: naam,
     prijs: parseFloat(prijs.replace(",", ".")) || 0,
     categorie: categorie,
     emoji: emoji || "🍽️",
@@ -661,6 +668,10 @@ function menuItemBewerkAnnuleren(){
 function menuItemBewerkOpslaan(id, naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
   naam = (naam || "").trim();
   if(!naam || !prijs || !categorie) return;
+  if(naam.length > MAX_LETTERS_PRODUCTNAAM){
+    toonToast(`Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.`);
+    return;
+  }
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).update({
     naam: naam,
     prijs: parseFloat(prijs.replace(",", ".")) || 0,
@@ -1043,8 +1054,16 @@ function siteUpdateBewerkOpslaan(id, titel, tekst){
 }
 
 // ---------- winkelwagen ----------
+// Telt het totaal aantal producten (som van alle aantallen) dat al in de winkelwagen zit.
+function wagenTotaalAantal(wagen){
+  return Object.values(wagen || {}).reduce((s, i) => s + (i.aantal || 0), 0);
+}
 function toevoegenAanWagen(id, item){
   if(!item || item.uitverkocht) return;
+  if(wagenTotaalAantal(state.winkelwagen) >= MAX_PRODUCTEN_PER_BESTELLING){
+    toonToast(`Je kan maximaal ${MAX_PRODUCTEN_PER_BESTELLING} producten per bestelling bestellen.`);
+    return;
+  }
   if(state.winkelwagen[id]){
     state.winkelwagen[id].aantal += 1;
   } else {
@@ -1063,6 +1082,10 @@ function toevoegenAanWagen(id, item){
 }
 function wagenAantalWijzigen(id, delta){
   if(!state.winkelwagen[id]) return;
+  if(delta > 0 && wagenTotaalAantal(state.winkelwagen) >= MAX_PRODUCTEN_PER_BESTELLING){
+    toonToast(`Je kan maximaal ${MAX_PRODUCTEN_PER_BESTELLING} producten per bestelling bestellen.`);
+    return;
+  }
   state.winkelwagen[id].aantal += delta;
   if(state.winkelwagen[id].aantal <= 0) delete state.winkelwagen[id];
   render();
@@ -1770,6 +1793,33 @@ function renderInstellingen(){
     ${inhoudHtml}`;
 }
 
+// Toont alle systeemupdates (nieuw én al eerder gelezen) in Instellingen > Algemeen — deze lijst
+// blijft compleet zichtbaar totdat sitebeheer een update zelf verwijdert (zie siteUpdateVerwijderen).
+function renderInstellingenUpdates(){
+  const updatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
+  const updatesHtml = updatesArr.length ? `
+    <ul class="update-lijst">
+      ${updatesArr.map(([,u]) => {
+        const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
+        return `
+        <li>
+          <div>
+            <span class="update-lijst__datum">${datum}</span>
+            ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
+            <span>${u.tekst}</span>
+          </div>
+        </li>`;
+      }).join("")}
+    </ul>` : `<div class="leeg">Nog geen updates geplaatst.</div>`;
+
+  return `
+    <div class="instel-blok">
+      <div class="instel-blok__titel">📰 Updates van ${MERKNAAM}</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Alle updates blijven hier staan totdat sitebeheer ze verwijdert.</p>
+      ${updatesHtml}
+    </div>`;
+}
+
 function renderInstellingenAlgemeen(){
   const eigenLid = state.leden[state.ledId];
   const isEigenaar = !!(eigenLid && eigenLid.eigenaar);
@@ -1818,6 +1868,8 @@ function renderInstellingenAlgemeen(){
     </div>
 
     ${teamHtml}
+
+    ${renderInstellingenUpdates()}
 
     <div class="instel-blok">
       <div class="instel-blok__titel">Zelfbestellen (QR-code)</div>
@@ -1909,7 +1961,7 @@ function renderInstellingenProducten(){
           <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
           ${emojiGrid}
         </div>
-        <input id="menu-naam" placeholder="Productnaam" value="${bewerkItem ? bewerkItem.naam : ""}">
+        <input id="menu-naam" placeholder="Productnaam" maxlength="${MAX_LETTERS_PRODUCTNAAM}" value="${bewerkItem ? bewerkItem.naam : ""}">
         <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)" value="${bewerkItem ? bewerkItem.prijs : ""}">
         <select id="menu-categorie" ${categorieenArr.length?"":"disabled"}>
           ${categorieenArr.length ? categorieenArr.map(([,c]) => `<option value="${c.naam}" ${bewerkItem && bewerkItem.categorie===c.naam?"selected":""}>${c.naam}</option>`).join("") : `<option value="">Maak eerst een categorie</option>`}
@@ -1917,6 +1969,7 @@ function renderInstellingenProducten(){
         <button class="btn btn--flame" data-action="${bewerkItem?'menu-opslaan':'menu-toevoegen'}" data-id="${state.bewerkMenuId||""}" ${categorieenArr.length?"":"disabled"}>${bewerkItem?"💾 Opslaan":"Toevoegen"}</button>
         ${bewerkItem ? `<button class="btn btn--ghost" data-action="menu-bewerk-annuleren">Annuleren</button>` : ""}
       </div>
+      <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.</p>
       <div class="menu-form__opties">
         <label class="menu-form__optie">
           <input type="checkbox" id="menu-ijskeuze" ${bewerkItem && bewerkItem.ijsKeuze?"checked":""}>
