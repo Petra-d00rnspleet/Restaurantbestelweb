@@ -1268,6 +1268,17 @@ function render(){
       </div>`;
     return;
   }
+  // Sitebeheer blijft altijd bereikbaar, ook als dit apparaat geblokkeerd is — zo kan de
+  // eigenaar altijd inloggen (bijv. via een link op de blokkade-pagina), ook op een apparaat
+  // dat zelf geblokkeerd staat.
+  if(state.beheerPaneelOpen && !state.beheerBezoekModus){
+    renderBeheerPaneel();
+    return;
+  }
+  if(state.beheerBezoekModus){
+    renderDashboard();
+    return;
+  }
   if(state.geblokkeerd){
     renderGeblokkeerd();
     return;
@@ -1276,9 +1287,7 @@ function render(){
     renderSiteNaamGate();
     return;
   }
-  if(state.beheerPaneelOpen && !state.beheerBezoekModus){
-    renderBeheerPaneel();
-  } else if(!state.actiefInRestaurant){
+  if(!state.actiefInRestaurant){
     renderLanding();
   } else {
     renderDashboard();
@@ -1323,6 +1332,7 @@ function renderGeblokkeerd(){
         <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
         <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Neem contact op met de beheerder.</p>
       </div>
+      <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
     </div>`;
 }
 
