@@ -37,6 +37,18 @@ function laadGelezenUpdates(){
   try { return JSON.parse(localStorage.getItem("ticket_gelezen_updates") || "[]") || []; }
   catch(e){ return []; }
 }
+// ---------- site-brede identiteit (los van een specifiek restaurant) ----------
+// Elk apparaat/browser krijgt één keer een willekeurig, blijvend apparaat-id (in localStorage) —
+// hierop wordt een eventuele blokkade door sitebeheer gekoppeld, zodat een andere naam invullen
+// een blokkade niet omzeilt.
+function laadApparaatId(){
+  let id = localStorage.getItem("ticket_apparaat_id");
+  if(!id){
+    id = "dev-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
+    localStorage.setItem("ticket_apparaat_id", id);
+  }
+  return id;
+}
 
 // ---------- status ----------
 const state = {
@@ -62,6 +74,14 @@ const state = {
   siteUpdates: {},
   bewerkSiteUpdateId: null,    // id van de systeemupdate die nu bewerkt wordt in sitebeheer, of null
   gelezenUpdates: laadGelezenUpdates(),   // ids van systeemupdates die je al als gelezen hebt gemarkeerd
+  apparaatId: laadApparaatId(),           // blijvend, willekeurig id van dit apparaat/deze browser
+  siteGebruikersNaam: localStorage.getItem("ticket_site_naam") || null, // naam die je invult vóór je de site in mag
+  siteNaamInvoerFout: "",
+  geblokkeerd: null,               // { naam, sinds, totEnMet } als dit apparaat geblokkeerd is door sitebeheer, anders null
+  geblokkeerdGecontroleerd: false, // is de eerste blokkade-check al binnengekomen? (voorkomt flitsen van de site vóór de check klaar is)
+  gebruikersLijst: {},             // alle apparaten die ooit een naam hebben ingevuld (alleen geladen als het beheerpaneel open is)
+  gebruikersLijstGeladen: false,
+  bansLijst: {},                   // alle actieve/verlopen blokkades (alleen geladen als het beheerpaneel open is)
   beheerderActief: false,  // wordt gezet door Firebase Auth (zie onAuthStateChanged onderaan), niet meer lokaal opgeslagen
   beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
   beheerFoutmelding: "",
@@ -84,6 +104,7 @@ const MERKNAAM = "Restaurants";
 const MAX_RESTAURANTS_PER_PERSOON = 2;
 const MAX_PRODUCTEN_PER_BESTELLING = 20; // max. totaal aantal producten (som van aantallen) in één bestelling
 const MAX_LETTERS_PRODUCTNAAM = 10;      // max. aantal tekens voor een productnaam
+const MAX_LETTERS_SITE_NAAM = 20;        // max. aantal tekens voor de site-brede gebruikersnaam
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
 const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
@@ -159,6 +180,29 @@ function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam){
 function mijnRestaurantVerwijderenUitLijst(code){
   state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+}
+// ---------- site-brede gebruikersnaam (verplicht vóór de rest van de site) ----------
+// Slaat de ingevulde naam lokaal op en registreert/werkt dit apparaat bij in de site-brede
+// gebruikerslijst (voor Sitebeheer > Gebruikers) — los van welk restaurant je straks kiest.
+function siteNaamOpslaan(naam){
+  naam = (naam || "").trim();
+  if(!naam){ state.siteNaamInvoerFout = "Vul je naam in."; render(); return; }
+  if(naam.length > MAX_LETTERS_SITE_NAAM){ state.siteNaamInvoerFout = `Maximaal ${MAX_LETTERS_SITE_NAAM} letters.`; render(); return; }
+  state.siteNaamInvoerFout = "";
+  state.siteGebruikersNaam = naam;
+  localStorage.setItem("ticket_site_naam", naam);
+  gebruikerRegistreren();
+  render();
+}
+function gebruikerRegistreren(){
+  const ref = db.ref("gebruikers/" + state.apparaatId);
+  ref.once("value").then(snap => {
+    ref.update({
+      naam: state.siteGebruikersNaam,
+      laatsteBezoek: firebase.database.ServerValue.TIMESTAMP,
+      ...(snap.exists() ? {} : { eersteBezoek: firebase.database.ServerValue.TIMESTAMP }),
+    });
+  });
 }
 const MAX_LETTERS_RESTAURANTNAAM = 10;   // max. aantal tekens voor een restaurantnaam
 function restaurantNaamWijzigen(nieuweNaam){
@@ -806,6 +850,8 @@ function beheerPaneelOpenen(){
     alleRestaurantsLuisteren();
     sitebeheerPogingenLuisteren();
     feedbackLuisteren();
+    gebruikersLuisteren();
+    bansLuisteren();
   }
   render();
 }
@@ -848,10 +894,15 @@ function beheerderUitloggen(){
   db.ref("restaurants").off();
   db.ref("sitebeheer_pogingen").off();
   db.ref("feedback").off();
+  db.ref("gebruikers").off();
+  db.ref("bans").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
   state.sitebeheerPogingen = {};
   state.feedback = {};
+  state.gebruikersLijst = {};
+  state.gebruikersLijstGeladen = false;
+  state.bansLijst = {};
   if(state.beheerBezoekModus) beheerRestaurantVerlaten(false);
   state.beheerPaneelOpen = false;
   render();
@@ -861,10 +912,15 @@ function beheerPaneelSluiten(){
   db.ref("restaurants").off();
   db.ref("sitebeheer_pogingen").off();
   db.ref("feedback").off();
+  db.ref("gebruikers").off();
+  db.ref("bans").off();
   state.alleRestaurants = {};
   state.alleRestaurantsGeladen = false;
   state.sitebeheerPogingen = {};
   state.feedback = {};
+  state.gebruikersLijst = {};
+  state.gebruikersLijstGeladen = false;
+  state.bansLijst = {};
   state.beheerPaneelOpen = false;
   render();
 }
@@ -914,6 +970,55 @@ function feedbackLuisteren(){
 }
 function feedbackVerwijderen(id){
   db.ref("feedback/" + id).remove();
+}
+// ---------- gebruikers & blokkades (Sitebeheer) ----------
+// Luistert live naar alle apparaten die ooit een site-naam hebben ingevuld, alleen zolang
+// het beheerpaneel open is.
+function gebruikersLuisteren(){
+  db.ref("gebruikers").on("value", snap => {
+    state.gebruikersLijst = snap.val() || {};
+    state.gebruikersLijstGeladen = true;
+    render();
+  });
+}
+// Luistert live naar alle blokkades (actief én verlopen), alleen zolang het beheerpaneel open is.
+function bansLuisteren(){
+  db.ref("bans").on("value", snap => {
+    state.bansLijst = snap.val() || {};
+    render();
+  });
+}
+// Blokkeert een apparaat voor het opgegeven aantal dagen, of voor onbepaalde tijd als
+// dagen null is. Overschrijft een eventuele bestaande blokkade van dat apparaat.
+function beheerGebruikerBlokkeren(apparaatId, dagen){
+  const gebruiker = state.gebruikersLijst[apparaatId];
+  const naam = gebruiker ? gebruiker.naam : apparaatId;
+  const payload = { naam, sinds: firebase.database.ServerValue.TIMESTAMP };
+  if(dagen) payload.totEnMet = Date.now() + dagen * 24 * 60 * 60 * 1000;
+  db.ref("bans/" + apparaatId).set(payload).then(() => {
+    toonToast(dagen ? `${naam} geblokkeerd voor ${dagen} dag${dagen===1?"":"en"}` : `${naam} voor onbepaalde tijd geblokkeerd`);
+  });
+}
+function beheerGebruikerBlokkerenDagen(apparaatId){
+  const gebruiker = state.gebruikersLijst[apparaatId];
+  const naam = gebruiker ? gebruiker.naam : apparaatId;
+  const invoer = prompt(`Hoeveel dagen wil je "${naam}" blokkeren?`, "7");
+  if(invoer === null) return;
+  const dagen = parseInt(invoer, 10);
+  if(!dagen || dagen < 1){ toonToast("Vul een geldig aantal dagen in (1 of meer)."); return; }
+  beheerGebruikerBlokkeren(apparaatId, dagen);
+}
+function beheerGebruikerBlokkerenOneindig(apparaatId){
+  const gebruiker = state.gebruikersLijst[apparaatId];
+  const naam = gebruiker ? gebruiker.naam : apparaatId;
+  if(!confirm(`"${naam}" voor onbepaalde tijd blokkeren?`)) return;
+  beheerGebruikerBlokkeren(apparaatId, null);
+}
+// Heft een blokkade op — werkt ook voor een blokkade die op "oneindig" stond.
+function beheerGebruikerDeblokkeren(apparaatId){
+  const gebruiker = state.gebruikersLijst[apparaatId];
+  const naam = gebruiker ? gebruiker.naam : apparaatId;
+  db.ref("bans/" + apparaatId).remove().then(() => toonToast(`${naam} gedeblokkeerd`));
 }
 // Als beheerder een restaurant van iemand anders openen — met volledige rechten, zonder
 // dat dit iets aan je eigen apparaat-instellingen (localStorage) verandert.
@@ -1150,6 +1255,27 @@ function qrPrinten(){
 // RENDER
 // ============================================================
 function render(){
+  // Blokkade-check gaat altijd voor: nog niet binnengekomen? Toon even niets ingrijpends
+  // (voorkomt dat de site al even zichtbaar is vóór we weten of dit apparaat geblokkeerd is).
+  if(!state.geblokkeerdGecontroleerd){
+    root.innerHTML = `
+      <div class="landing">
+        <div class="landing__mark">
+          <div class="landing__eyebrow">Welkom bij</div>
+          <h1 class="landing__title">${MERKNAAM}</h1>
+          <div class="landing__divider"><span class="landing__diamond"></span></div>
+        </div>
+      </div>`;
+    return;
+  }
+  if(state.geblokkeerd){
+    renderGeblokkeerd();
+    return;
+  }
+  if(!state.siteGebruikersNaam){
+    renderSiteNaamGate();
+    return;
+  }
   if(state.beheerPaneelOpen && !state.beheerBezoekModus){
     renderBeheerPaneel();
   } else if(!state.actiefInRestaurant){
@@ -1157,6 +1283,47 @@ function render(){
   } else {
     renderDashboard();
   }
+}
+// Verplicht scherm vóór de rest van de site: hier vul je je naam in, zodat sitebeheer
+// je (via je apparaat) eventueel op de banlijst kan zetten. Verschijnt maar één keer per
+// apparaat — de naam blijft daarna in localStorage staan.
+function renderSiteNaamGate(){
+  root.innerHTML = `
+    <div class="landing">
+      <div class="landing__mark">
+        <div class="landing__eyebrow">Welkom bij</div>
+        <h1 class="landing__title">${MERKNAAM}</h1>
+        <div class="landing__divider"><span class="landing__diamond"></span></div>
+      </div>
+      <div class="form-card">
+        <label class="form-card__label">Hoe mogen we je noemen?</label>
+        <input id="input-site-naam" type="text" placeholder="Bijv. Sara" maxlength="${MAX_LETTERS_SITE_NAAM}" autofocus>
+        <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Vul je naam in om verder te gaan naar ${MERKNAAM}.</p>
+        ${state.siteNaamInvoerFout ? `<div class="fout">${state.siteNaamInvoerFout}</div>` : ""}
+        <button class="btn btn--flame btn--block" data-action="site-naam-opslaan">Doorgaan</button>
+      </div>
+    </div>`;
+  const verstuur = () => siteNaamOpslaan(document.getElementById("input-site-naam").value);
+  document.getElementById("input-site-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
+}
+// Aparte pagina die een geblokkeerd apparaat te zien krijgt in plaats van de rest van de site —
+// blijft zichtbaar totdat de dagen om zijn of sitebeheer de blokkade opheft.
+function renderGeblokkeerd(){
+  const info = state.geblokkeerd;
+  const oneindig = typeof info.totEnMet !== "number";
+  const totTekst = oneindig ? "" : `, tot ${new Date(info.totEnMet).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}`;
+  root.innerHTML = `
+    <div class="landing">
+      <div class="landing__mark">
+        <div class="landing__eyebrow">${MERKNAAM}</div>
+        <h1 class="landing__title">Toegang geblokkeerd</h1>
+        <div class="landing__divider"><span class="landing__diamond"></span></div>
+      </div>
+      <div class="form-card">
+        <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
+        <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Neem contact op met de beheerder.</p>
+      </div>
+    </div>`;
 }
 
 function renderLanding(){
@@ -1336,6 +1503,33 @@ function renderBeheerPaneel(){
         </div>`;
       }).join("");
 
+  const gebruikersArr = Object.entries(state.gebruikersLijst || {}).sort((a,b) => (b[1].laatsteBezoek||0)-(a[1].laatsteBezoek||0));
+  const gebruikersHtml = !state.gebruikersLijstGeladen ? `<div class="leeg">Gebruikers laden…</div>`
+    : gebruikersArr.length === 0 ? `<div class="leeg">Nog niemand heeft een naam ingevuld.</div>`
+    : gebruikersArr.map(([apparaatId, g]) => {
+        const ban = state.bansLijst[apparaatId];
+        const oneindig = ban && typeof ban.totEnMet !== "number";
+        const nogActief = ban && (oneindig || ban.totEnMet > Date.now());
+        const eersteDatum = g.eersteBezoek ? new Date(g.eersteBezoek).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "?";
+        const laatsteDatum = g.laatsteBezoek ? new Date(g.laatsteBezoek).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "?";
+        const statusHtml = nogActief
+          ? `<span class="team-rij__badge" style="border-color:var(--ember); color:var(--ember);">${oneindig ? "Geblokkeerd · oneindig" : "Geblokkeerd tot " + new Date(ban.totEnMet).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"})}</span>`
+          : ban ? `<span class="team-rij__badge">Blokkade verlopen</span>` : "";
+        return `
+        <div class="beheer-rest-rij">
+          <div class="beheer-rest-rij__info">
+            <div class="beheer-rest-rij__naam">${g.naam || "(onbekend)"} ${statusHtml}</div>
+            <div class="beheer-rest-rij__meta">Eerste bezoek ${eersteDatum} · laatst gezien ${laatsteDatum}</div>
+          </div>
+          <div class="beheer-rest-rij__acties">
+            ${nogActief
+              ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
+              : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
+                 <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${apparaatId}">Blokkeer oneindig</button>`}
+          </div>
+        </div>`;
+      }).join("");
+
   const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
   const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
     const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
@@ -1402,6 +1596,12 @@ function renderBeheerPaneel(){
         <h2 class="view-titel">Alle restaurants</h2>
         <div class="instel-blok">
           <div class="beheer-rest-lijst">${restaurantsHtml}</div>
+        </div>
+
+        <h2 class="view-titel">👥 Gebruikers & blokkades</h2>
+        <div class="instel-blok">
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Iedereen die ooit een naam heeft ingevuld op het startscherm. Een blokkade is gekoppeld aan het apparaat, dus een andere naam invullen helpt niet om 'm te omzeilen.</p>
+          <div class="beheer-rest-lijst">${gebruikersHtml}</div>
         </div>
 
         <h2 class="view-titel">💬 Feedback van eigenaren</h2>
@@ -2327,6 +2527,13 @@ root.addEventListener("click", e => {
     case "categorie-verwijder": categorieVerwijderen(id); break;
 
     case "update-gelezen": updateGelezenMarkeren(id); break;
+
+    case "site-naam-opslaan":
+      siteNaamOpslaan(document.getElementById("input-site-naam").value);
+      break;
+    case "gebruiker-blokkeren-dagen": beheerGebruikerBlokkerenDagen(id); break;
+    case "gebruiker-blokkeren-oneindig": beheerGebruikerBlokkerenOneindig(id); break;
+    case "gebruiker-deblokkeren": beheerGebruikerDeblokkeren(id); break;
   }
 });
 
@@ -2364,12 +2571,23 @@ db.ref("site_updates").on("value", snap => {
   state.siteUpdates = snap.val() || {};
   render();
 });
+// Blokkade-check voor dit apparaat: altijd actief (los van welk scherm actief is), zodat
+// sitebeheer iemand ook tíjdens een sessie meteen kan blokkeren of weer vrijgeven.
+db.ref("bans/" + state.apparaatId).on("value", snap => {
+  const data = snap.val();
+  state.geblokkeerdGecontroleerd = true;
+  state.geblokkeerd = (data && (typeof data.totEnMet !== "number" || data.totEnMet > Date.now())) ? data : null;
+  render();
+});
+// Als dit apparaat al eerder een naam heeft ingevuld, meteen de gebruikerslijst bijwerken
+// (laatste bezoek) — zo blijft Sitebeheer > Gebruikers actueel.
+if(state.siteGebruikersNaam) gebruikerRegistreren();
 // Houdt de sitebeheer-status bij op basis van Firebase Authentication (server-side gecontroleerd,
 // niet meer via localStorage) — vuurt ook meteen bij het laden als je nog een geldige sessie hebt.
 auth.onAuthStateChanged(gebruiker => {
   state.beheerderActief = !!gebruiker;
   state.beheerFoutmelding = "";
-  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); }
+  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
   render();
 });
 render();
