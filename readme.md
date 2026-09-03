@@ -3,6 +3,7 @@
 Een klein bestelsysteem voor een restaurant: **Bestellen → Keuken → Bezorgen**,
 live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
+- **Naam invullen (verplicht)**: de allereerste keer dat je de site opent, vraagt hij eerst je naam — pas daarna kom je bij het startscherm. Dit is los van de naam die je later bij het maken/joinen van een restaurant invult. Deze naam blijft op je apparaat onthouden (net als je restaurants), en dient om jou als sitebeheerder te herkennen als je iemand op de banlijst wilt zetten (zie Sitebeheer hieronder).
 - **Restaurant maken/joinen**: bij het maken van een restaurant, én bij het joinen met een code, vul je ook je eigen naam in. Zo weet iedereen wie er in het team zit. Per apparaat/persoon kun je **maximaal 2 restaurants** hebben (gemaakt + gejoind samen) — zolang je dat maximum nog niet hebt bereikt, zie je op het startscherm de keuzes "Restaurant maken" en "Restaurant joinen"; daarna niet meer. Een restaurant kun je niet zelf uit je lijst verwijderen door het te "verlaten" — dat kan alleen doordat de eigenaar je als teamlid verwijdert, of doordat sitebeheer het hele restaurant verwijdert. Zolang je actief in een restaurant zit, kun je via **"🔀 Wissel restaurant"** (in de bovenbalk of onderaan Instellingen) gewoon teruggaan naar het startscherm om naar je andere restaurant te gaan — dat restaurant blijft daarbij gewoon in je lijst staan.
 - **Bestellen**: als er een plattegrond is ingesteld, zie je eerst de plattegrond — klik op een tafel om er een bestelling voor te plaatsen. Een tafel gaat op **bezet** zodra er een bestelling voor is verstuurd, en wordt pas weer **vrij** als je op "Tafel betaald" klikt. Er is ook altijd de optie "Bestelling zonder tafel" voor een bestelling die niet aan een tafel gekoppeld is. Klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
 - **Keuken**: nieuwe bestellingen komen direct binnen als "bonnetjes" op élk apparaat dat de site open heeft. Klik op **Bereiden** en daarna op **Bereiden klaar**.
@@ -76,6 +77,11 @@ Onderaan het startscherm (en onderaan Instellingen, als je al in een restaurant 
 - De **systeemupdates** schrijven en verwijderen (titel + tekst) — dit stond eerder in het Instellingen-tabblad van elk restaurant, maar staat nu alleen nog hier.
 - De **inlogpogingen** van de laatste tijd zien (gelukt én mislukt, met tijdstip, naam en het ingevoerde e-mailadres) — zo zie je hier zelf of iemand geprobeerd heeft binnen te komen. Elke regel is met een ✕ weg te klikken. Na 3 mislukte pogingen achter elkaar wordt inloggen op dat apparaat/browser 15 minuten geblokkeerd (het inlogformulier toont dan hoelang nog); dit is een lokale blokkade per apparaat, dus geen vervanging voor een sterk wachtwoord.
 - **Feedback van eigenaren** lezen — elke restaurant-eigenaar kan in Instellingen → Algemeen een bericht sturen ("ik zou graag ... willen"); dat komt hier binnen met naam, restaurant en tijdstip, en is met ✕ weg te klikken zodra je het verwerkt hebt.
+- **Gebruikers & blokkades**: hier zie je iedereen die ooit een naam heeft ingevuld op het startscherm (zie hierboven), met eerste en laatste bezoek. Per gebruiker kun je:
+  - **Blokkeren voor X dagen** (je vult het aantal dagen in) of **blokkeren voor onbepaalde tijd** ("oneindig");
+  - **Deblokkeren** — dit werkt ook voor een blokkade die op "oneindig" stond.
+
+  Een blokkade is gekoppeld aan het **apparaat** (een willekeurig id dat lokaal wordt opgeslagen), niet alleen aan de ingevulde naam — een andere naam invullen op hetzelfde apparaat omzeilt de blokkade dus niet. Zolang iemand geblokkeerd is, ziet die persoon in plaats van de site een aparte pagina met "Toegang geblokkeerd", tot de dagen om zijn of jij 'm handmatig opheft. Wist iemand de eigen browsergegevens (localStorage), dan telt dat als een nieuw, ongeblokkeerd apparaat — net zoals de restaurantcode is dit een bewust lichte vorm van beveiliging, geen sluitend systeem.
 
 Dit werkt met een **echt account via Firebase Authentication** — er staat geen wachtwoord meer ergens in de broncode. Zo stel je dat in:
 
@@ -139,6 +145,14 @@ Ga naar **Realtime Database → Regels** en zet:
     "feedback": {
       ".read": "auth != null",
       ".write": true
+    },
+    "gebruikers": {
+      ".read": "auth != null",
+      ".write": true
+    },
+    "bans": {
+      ".read": true,
+      ".write": "auth != null"
     }
   }
 }
@@ -150,6 +164,8 @@ Wat dit doet:
 - Systeemupdates blijven voor iedereen leesbaar, maar alleen ingelogde beheerders kunnen ze plaatsen/verwijderen.
 - Elke inlogpoging bij Sitebeheer (gelukt én mislukt) wordt weggeschreven naar `sitebeheer_pogingen` — dat moet zonder inloggen kunnen schrijven (iemand die nog niet is ingelogd, is per definitie degene die een poging doet), maar **lezen** van die lijst kan alleen met een geldige inlogsessie. Zo kun jij als eigenaar zien of iemand geprobeerd heeft binnen te komen, zonder dat een buitenstaander die lijst ook kan inzien.
 - Feedback-berichten van restaurant-eigenaren (`feedback`) werken op dezelfde manier: schrijven kan zonder inloggen (want teamleden loggen nergens mee in), lezen kan alleen met een geldige inlogsessie.
+- `gebruikers` (de site-brede naamlijst) werkt ook zo: elk apparaat mag zijn eigen ingevulde naam wegschrijven zonder in te loggen, maar de hele lijst tegelijk opvragen (wat het Sitebeheer-paneel doet) kan alleen met een geldige inlogsessie.
+- `bans` is net andersom: **schrijven** (iemand blokkeren/deblokkeren) kan alleen met een geldige inlogsessie, maar **lezen** staat open — dat is nodig omdat elk apparaat zonder in te loggen moet kunnen checken of het zelf geblokkeerd is. Dit betekent dat de banlijst (namen + apparaat-id's) in theorie door iedereen is op te vragen die rechtstreeks met de database praat; net als bij de restaurantcode is dit een bewuste, lichte keuze, geen lek van gevoeligere gegevens dan een naam.
 
 ⚠️ Let op: de restaurantcode (`$code`) zelf werkt nog steeds als een soort "wachtwoord" voor dat ene restaurant — wie de code weet of raadt, kan dat restaurant lezen/wijzigen. Dat is een bewuste, lichte keuze van dit project (net als bij een tafelbon-code) en geen verkeerde configuratie; alleen het **sitebeheer-gedeelte** (alle restaurants + systeemupdates) is nu met een echt account afgeschermd.
 
@@ -186,6 +202,18 @@ Daarna:
 ## Hoe de data eruitziet in Firebase
 
 ```
+gebruikers/                   ← site-brede lijst, los van een restaurant
+  dev-abc123.../ {            ← apparaat-id (willekeurig, opgeslagen in localStorage)
+    naam: "Sara",
+    eersteBezoek: <timestamp>,
+    laatsteBezoek: <timestamp>
+  }
+bans/
+  dev-abc123.../ {            ← zelfde apparaat-id als hierboven
+    naam: "Sara",              ← naam op het moment van blokkeren (voor weergave in Sitebeheer)
+    sinds: <timestamp>,
+    totEnMet: <timestamp>      ← afwezig/weggelaten = voor onbepaalde tijd geblokkeerd
+  }
 restaurants/
   K3F7Q/                      ← restaurantcode
     naam: "De Gouden Pan"
