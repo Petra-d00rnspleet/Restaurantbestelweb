@@ -945,9 +945,20 @@ function sitebeheerPogingVerwijderen(id){
 // Stuurt een bericht van een restaurant-eigenaar naar sitebeheer (bijv. "ik zou graag X willen").
 // Dit werkt zonder inloggen — net als de rest van de app voor teamleden — en komt terecht in een
 // apart, alleen-voor-ingelogde-beheerders-leesbaar deel van de database (zie readme.md).
+const FEEDBACK_WACHTTIJD_MS = 5 * 60 * 1000; // maar 1x per 5 minuten een bericht naar sitebeheer
+function feedbackWachttijdOver(){
+  const laatst = Number(localStorage.getItem("ticket_feedback_laatst") || 0);
+  const resterendMs = laatst + FEEDBACK_WACHTTIJD_MS - Date.now();
+  return resterendMs > 0 ? Math.ceil(resterendMs / 60000) : 0;
+}
 function feedbackVersturen(tekst){
   tekst = (tekst || "").trim();
   if(!tekst) return;
+  const minutenOver = feedbackWachttijdOver();
+  if(minutenOver > 0){
+    toonToast(`Je kunt maar 1x per 5 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
+    return;
+  }
   const eigenLid = state.leden[state.ledId];
   db.ref("feedback").push({
     restaurantCode: state.restaurantCode,
@@ -956,6 +967,7 @@ function feedbackVersturen(tekst){
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   }).then(() => {
+    localStorage.setItem("ticket_feedback_laatst", String(Date.now()));
     const veld = document.getElementById("feedback-tekst");
     if(veld) veld.value = "";
     toonToast("Bericht verstuurd naar sitebeheer");
@@ -1399,8 +1411,6 @@ function renderLanding(){
           <label class="form-card__label">Naam van je restaurant</label>
           <input id="input-naam" type="text" placeholder="Bijv. GoudenPan" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" autofocus>
           <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>
-          <label class="form-card__label">Jouw naam</label>
-          <input id="input-eigen-naam-maken" type="text" placeholder="Bijv. Sara">
           ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="maak-restaurant">Restaurant aanmaken</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
@@ -1408,10 +1418,9 @@ function renderLanding(){
       </div>`;
     const verstuurMaken = () => restaurantMaken(
       document.getElementById("input-naam").value,
-      document.getElementById("input-eigen-naam-maken").value
+      state.siteGebruikersNaam
     );
     document.getElementById("input-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuurMaken(); });
-    document.getElementById("input-eigen-naam-maken").addEventListener("keydown", e => { if(e.key === "Enter") verstuurMaken(); });
   } else if(state.landingScherm === "joinen"){
     root.innerHTML = `
       <div class="landing">
@@ -1419,8 +1428,6 @@ function renderLanding(){
         <div class="form-card">
           <label class="form-card__label">Restaurantcode</label>
           <input id="input-code" type="text" placeholder="Bijv. K3F7Q" autofocus style="text-transform:uppercase; letter-spacing:.1em;">
-          <label class="form-card__label">Jouw naam</label>
-          <input id="input-eigen-naam-joinen" type="text" placeholder="Bijv. Sara">
           ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="join-restaurant">Restaurant joinen</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
@@ -1428,10 +1435,9 @@ function renderLanding(){
       </div>`;
     const verstuurJoinen = () => restaurantJoinen(
       document.getElementById("input-code").value,
-      document.getElementById("input-eigen-naam-joinen").value
+      state.siteGebruikersNaam
     );
     document.getElementById("input-code").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
-    document.getElementById("input-eigen-naam-joinen").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
   }
 }
 
@@ -1450,10 +1456,8 @@ function renderBeheerPaneel(){
           <div class="landing__divider"><span class="landing__diamond"></span></div>
         </div>
         <div class="form-card">
-          <label class="form-card__label">Jouw naam</label>
-          <input id="beheer-naam" type="text" placeholder="Bijv. Sara" ${geblokkeerd?"disabled":"autofocus"}>
           <label class="form-card__label">E-mailadres</label>
-          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":""}>
+          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":"autofocus"}>
           <label class="form-card__label">Wachtwoord</label>
           <input id="beheer-wachtwoord" type="password" placeholder="••••••••" ${geblokkeerd?"disabled":""}>
           ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : geblokkeerd ? `<div class="fout">Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.</div>` : ""}
@@ -1463,11 +1467,10 @@ function renderBeheerPaneel(){
       </div>`;
     if(geblokkeerd) return;
     const verstuur = () => beheerInloggen(
-      document.getElementById("beheer-naam").value,
+      state.siteGebruikersNaam,
       document.getElementById("beheer-email").value,
       document.getElementById("beheer-wachtwoord").value
     );
-    document.getElementById("beheer-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     document.getElementById("beheer-email").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     document.getElementById("beheer-wachtwoord").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
     return;
@@ -2090,13 +2093,17 @@ function renderInstellingenAlgemeen(){
       <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
     </div>
 
-    ${isEigenaar ? `
+    ${isEigenaar ? (() => {
+      const feedbackMinutenOver = feedbackWachttijdOver();
+      const feedbackGeblokkeerd = feedbackMinutenOver > 0;
+      return `
     <div class="instel-blok">
       <div class="instel-blok__titel">💬 Bericht naar sitebeheer</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Wil je iets aan ${MERKNAAM} verbeterd zien? Stuur het rechtstreeks naar de bouwer van de site.</p>
-      <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
-      <button class="btn btn--flame" style="margin-top:10px;" data-action="feedback-versturen">Versturen</button>
-    </div>` : ""}
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Wil je iets aan ${MERKNAAM} verbeterd zien? Stuur het rechtstreeks naar de bouwer van de site. Je kunt maar 1x per 5 minuten een bericht sturen.</p>
+      <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." ${feedbackGeblokkeerd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
+      <button class="btn btn--flame" style="margin-top:10px;" data-action="feedback-versturen" ${feedbackGeblokkeerd?"disabled":""}>${feedbackGeblokkeerd ? `Wacht nog ${feedbackMinutenOver} minuut${feedbackMinutenOver===1?"":"en"}` : "Versturen"}</button>
+    </div>`;
+    })() : ""}
 
     <div class="instel-blok">
       <div class="instel-blok__titel">Dit restaurant</div>
@@ -2376,13 +2383,13 @@ root.addEventListener("click", e => {
     case "maak-restaurant":
       restaurantMaken(
         document.getElementById("input-naam").value,
-        document.getElementById("input-eigen-naam-maken").value
+        state.siteGebruikersNaam
       );
       break;
     case "join-restaurant":
       restaurantJoinen(
         document.getElementById("input-code").value,
-        document.getElementById("input-eigen-naam-joinen").value
+        state.siteGebruikersNaam
       );
       break;
     case "doorgaan-restaurant": {
@@ -2427,7 +2434,7 @@ root.addEventListener("click", e => {
     case "beheer-sluiten": beheerPaneelSluiten(); break;
     case "beheer-inloggen":
       beheerInloggen(
-        document.getElementById("beheer-naam").value,
+        state.siteGebruikersNaam,
         document.getElementById("beheer-email").value,
         document.getElementById("beheer-wachtwoord").value
       );
