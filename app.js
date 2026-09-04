@@ -772,6 +772,39 @@ function ledVerwijderen(ledId){
   if(!confirm("Dit teamlid verwijderen? Diegene moet opnieuw joinen om weer toegang te krijgen.")) return;
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
 }
+// Wijzigt je naam SITE-BREED — je site-brede identiteit (Sitebeheer > Gebruikers, en de
+// standaardnaam bij een volgend restaurant maken/joinen) én je naam bij elk restaurant waar
+// je op dit toestel lid van bent, allemaal in één keer. Mag door elk teamlid, ook de eigenaar
+// zelf (in tegenstelling tot functie/rechten hierboven, die alleen de eigenaar bij ándere
+// leden mag zetten).
+function eigenNaamWijzigen(nieuweNaam){
+  nieuweNaam = (nieuweNaam || "").trim();
+  if(!nieuweNaam){ toonToast("Vul een naam in."); return; }
+  if(nieuweNaam.length > MAX_LETTERS_SITE_NAAM){ toonToast(`Maximaal ${MAX_LETTERS_SITE_NAAM} letters.`); return; }
+
+  // Site-brede naam (naamscherm, Sitebeheer > Gebruikers) — geen voorafgaande lees-actie
+  // nodig, zie gebruikerRegistreren() hierboven voor waarom.
+  state.siteGebruikersNaam = nieuweNaam;
+  localStorage.setItem("ticket_site_naam", nieuweNaam);
+  db.ref("gebruikers/" + state.apparaatId).update({
+    naam: nieuweNaam,
+    laatsteBezoek: firebase.database.ServerValue.TIMESTAMP,
+  });
+
+  // Naam bijwerken bij elk restaurant op dit apparaat, niet alleen het restaurant dat nu open staat.
+  const schrijfActies = state.mijnRestaurants.map(r =>
+    db.ref("restaurants/" + r.code + "/leden/" + r.ledId + "/naam").set(nieuweNaam).then(() => {
+      r.gebruikersNaam = nieuweNaam;
+    })
+  );
+
+  Promise.all(schrijfActies).then(() => {
+    state.gebruikersNaam = nieuweNaam;
+    localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+    toonToast("Naam overal aangepast");
+    render();
+  });
+}
 
 // ---------- plattegrond (tafels & stoelen) ----------
 // Bouwt een klein "3D" stoeltje (zit + rugleuning) dat mee kan draaien met obj.rotatie, zonder
@@ -2066,6 +2099,15 @@ function renderInstellingenAlgemeen(){
 
   return `
     <div class="instel-blok">
+      <div class="instel-blok__titel">Jouw naam</div>
+      <div class="naam-wijzig-form">
+        <input id="eigen-naam-invoer" maxlength="${MAX_LETTERS_SITE_NAAM}" value="${eigenLid ? eigenLid.naam : (state.gebruikersNaam || "")}">
+        <button class="btn btn--flame btn--sm" data-action="eigen-naam-opslaan">Opslaan</button>
+      </div>
+      <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Verandert je naam overal: bij al je restaurants op dit toestel én in de site-brede gebruikerslijst van sitebeheer.</p>
+    </div>
+
+    <div class="instel-blok">
       <div class="instel-blok__titel">Restaurantnaam</div>
       ${heeftRecht('instellingen') ? `
         <div class="naam-wijzig-form">
@@ -2476,6 +2518,9 @@ root.addEventListener("click", e => {
     case "lid-verwijderen": ledVerwijderen(id); break;
 
     case "instellingen-subtab": state.instellingenTab = el.dataset.tab; render(); break;
+    case "eigen-naam-opslaan":
+      eigenNaamWijzigen(document.getElementById("eigen-naam-invoer").value);
+      break;
     case "naam-opslaan":
       restaurantNaamWijzigen(document.getElementById("restaurant-naam-invoer").value);
       break;
