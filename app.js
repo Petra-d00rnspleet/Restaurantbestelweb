@@ -46,9 +46,11 @@ function laadApparaatId(){
   if(!id){
     id = "dev-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
     localStorage.setItem("ticket_apparaat_id", id);
+    apparaatIsNieuw = true;
   }
   return id;
 }
+let apparaatIsNieuw = false; // true als dit apparaat/browser hier voor het eerst komt (net een nieuw apparaat-id gekregen)
 
 // ---------- status ----------
 const state = {
@@ -195,14 +197,19 @@ function siteNaamOpslaan(naam){
   render();
 }
 function gebruikerRegistreren(){
-  const ref = db.ref("gebruikers/" + state.apparaatId);
-  ref.once("value").then(snap => {
-    ref.update({
-      naam: state.siteGebruikersNaam,
-      laatsteBezoek: firebase.database.ServerValue.TIMESTAMP,
-      ...(snap.exists() ? {} : { eersteBezoek: firebase.database.ServerValue.TIMESTAMP }),
-    });
-  });
+  // Let op: geen voorafgaande .once("value")-lees hier — dat mag voor gewone bezoekers
+  // niet (gebruikers > .read staat alleen open voor ingelogde beheerders), dus dat zou hier
+  // stil vastlopen voor iedereen behalve Sitebeheer zelf. In plaats daarvan onthouden we
+  // lokaal (apparaatIsNieuw) of dit een gloednieuw apparaat-id is, en schrijven we direct.
+  const payload = {
+    naam: state.siteGebruikersNaam,
+    laatsteBezoek: firebase.database.ServerValue.TIMESTAMP,
+  };
+  if(apparaatIsNieuw){
+    payload.eersteBezoek = firebase.database.ServerValue.TIMESTAMP;
+    apparaatIsNieuw = false;
+  }
+  db.ref("gebruikers/" + state.apparaatId).update(payload);
 }
 const MAX_LETTERS_RESTAURANTNAAM = 10;   // max. aantal tekens voor een restaurantnaam
 function restaurantNaamWijzigen(nieuweNaam){
