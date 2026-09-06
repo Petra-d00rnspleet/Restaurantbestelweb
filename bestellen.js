@@ -242,7 +242,45 @@ function gastBestellingVerzenden(){
 // ============================================================
 // RENDER
 // ============================================================
+// ---------- focus/waarde behouden bij een re-render ----------
+// Zonder dit springt de cursor uit een invoerveld (en kan getypte tekst zelfs verdwijnen)
+// zodra er, terwijl een gast aan het typen is, ergens een live update binnenkomt (bv. het menu
+// wijzigt) die een render() triggert — want render() vervangt de hele DOM-boom.
+function huidigeFocusVastleggen(){
+  const el = document.activeElement;
+  if(!el || !root.contains(el) || !("value" in el)) return null;
+  return {
+    id: el.id || null,
+    action: el.dataset ? el.dataset.action || null : null,
+    dataId: el.dataset ? (el.dataset.id != null ? el.dataset.id : null) : null,
+    waarde: el.value,
+    selStart: (typeof el.selectionStart === "number") ? el.selectionStart : null,
+    selEnd: (typeof el.selectionEnd === "number") ? el.selectionEnd : null,
+  };
+}
+function focusHerstellen(bewaard){
+  if(!bewaard) return;
+  let el = null;
+  if(bewaard.id) el = document.getElementById(bewaard.id);
+  if(!el && bewaard.action){
+    const selector = bewaard.dataId != null
+      ? `[data-action="${bewaard.action}"][data-id="${CSS.escape(bewaard.dataId)}"]`
+      : `[data-action="${bewaard.action}"]`;
+    el = root.querySelector(selector);
+  }
+  if(!el || !("value" in el)) return;
+  el.value = bewaard.waarde;
+  el.focus();
+  if(bewaard.selStart !== null && typeof el.setSelectionRange === "function"){
+    try{ el.setSelectionRange(bewaard.selStart, bewaard.selEnd); }catch(err){ /* niet elk inputtype ondersteunt dit */ }
+  }
+}
 function render(){
+  const bewaardeFocus = huidigeFocusVastleggen();
+  renderScherm();
+  focusHerstellen(bewaardeFocus);
+}
+function renderScherm(){
   if(state.fase === "laden") root.innerHTML = renderLaden();
   else if(state.fase === "fout") root.innerHTML = renderFout();
   else if(state.fase === "tafel") root.innerHTML = renderTafelKiezen();
