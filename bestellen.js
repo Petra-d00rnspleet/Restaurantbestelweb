@@ -44,6 +44,9 @@ const state = {
   thema: null,
   actieveTafelCel: null,
   tafel: "",
+  tafelBevestigdBezet: false,   // hebben we deze tafel al 1x "bezet" gezien terwijl we erop zaten?
+                                // (zie verbindenLuisteraars: zo weten we een echte "afgerekend en
+                                // vrijgegeven"-overgang te onderscheiden van gewoon een vrije tafel kiezen)
   winkelwagen: {},
   mijnBestellingen: {},        // live, gefilterd op gastId
   alleBestellingen: {},        // live, ALLE bestellingen van dit restaurant — alleen gebruikt om de
@@ -129,7 +132,30 @@ function verbindenLuisteraars(){
     render();
   });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => {
-    state.plattegrond = snap.val() || {};
+    const nieuwePlattegrond = snap.val() || {};
+    // Zit je op dit moment aan een tafel te bestellen? Kijk dan of het team die tafel intussen
+    // heeft afgerekend ("Tafel betaald — vrijgeven"). Zodra dat gebeurt, moet jij hier ook
+    // meteen uit — anders kun je op een tafel blijven bestellen die alweer vrij is voor de
+    // volgende gasten. We wachten wel tot we de tafel zelf 1x "bezet" hebben zien staan (dat
+    // gebeurt zodra je je eerste bestelling verstuurt), zodat het kiezen van een nog-vrije
+    // tafel je niet meteen weer terugstuurt naar het tafeloverzicht.
+    if(state.actieveTafelCel && state.fase === "bestellen"){
+      const huidigeCel = nieuwePlattegrond[state.actieveTafelCel];
+      const nogSteedsBezet = !!(huidigeCel && huidigeCel.type === "tafel" && huidigeCel.bezet);
+      if(state.tafelBevestigdBezet && !nogSteedsBezet){
+        state.plattegrond = nieuwePlattegrond;
+        state.actieveTafelCel = null;
+        state.tafel = "";
+        state.winkelwagen = {};
+        state.tafelBevestigdBezet = false;
+        state.fase = "tafel";
+        toonToast("Deze tafel is afgerekend en vrijgegeven — kies opnieuw een tafel.");
+        render();
+        return;
+      }
+      if(nogSteedsBezet) state.tafelBevestigdBezet = true;
+    }
+    state.plattegrond = nieuwePlattegrond;
     if(state.fase === "laden"){
       const heeftTafels = Object.values(state.plattegrond).some(c => c.type === "tafel");
       state.fase = heeftTafels ? "tafel" : "bestellen";
@@ -190,6 +216,7 @@ function gastTafelKiezen(cel){
   if(!celData || celData.type !== "tafel") return;
   state.actieveTafelCel = cel;
   state.tafel = "Tafel " + (celData.nummer || "");
+  state.tafelBevestigdBezet = !!celData.bezet; // als de tafel al bezet was (bv. teruggekomen na een refresh), telt dat meteen mee
   state.fase = "bestellen";
   render();
 }
