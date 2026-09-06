@@ -772,6 +772,47 @@ function ledVerwijderen(ledId){
   if(!confirm("Dit teamlid verwijderen? Diegene moet opnieuw joinen om weer toegang te krijgen.")) return;
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
 }
+// Eigenaar draagt het eigenaarschap over aan een ander (bestaand) teamlid. Jijzelf wordt
+// meteen gewoon teamlid terug (met alle rechten, zodat je zelf niets kwijtraakt), de gekozen
+// persoon wordt de nieuwe eigenaar. Eén atomische update, dus er is nooit een moment zonder
+// eigenaar. Onomkeerbaar vanaf hier — de nieuwe eigenaar kan jouw rechten later aanpassen.
+function ledEigenaarschapOverzetten(nieuwLedId){
+  const eigenLid = state.leden[state.ledId];
+  if(!eigenLid || !eigenLid.eigenaar) return;
+  const nieuweEigenaar = state.leden[nieuwLedId];
+  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
+  if(!confirm(`Eigenaarschap overdragen aan "${nieuweEigenaar.naam}"? Jij wordt daarna zelf gewoon teamlid (met alle rechten) en verliest de eigenaar-rol.`)) return;
+  const updates = {};
+  updates["leden/" + state.ledId + "/eigenaar"] = false;
+  updates["leden/" + state.ledId + "/rechten"] = { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true };
+  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
+  updates["leden/" + nieuwLedId + "/rechten"] = null;
+  db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
+    toonToast(`${nieuweEigenaar.naam} is nu eigenaar`);
+  });
+}
+// Sitebeheer-variant hiervan: grijpt in bij een ánder restaurant dan waar je zelf lid van
+// bent (bijv. als de eigenaar niet meer bereikbaar is). Vraagt geen bevestiging van de
+// vorige eigenaar — dit is bewust een beheerder-only overrule-actie.
+function beheerLidEigenaarMaken(code, nieuwLedId){
+  const gegevens = state.alleRestaurants[code];
+  if(!gegevens) return;
+  const leden = gegevens.leden || {};
+  const nieuweEigenaar = leden[nieuwLedId];
+  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
+  const huidigeEigenaarId = Object.keys(leden).find(id => leden[id].eigenaar);
+  if(!confirm(`Als sitebeheer het eigenaarschap van "${gegevens.naam}" overzetten naar "${nieuweEigenaar.naam}"?`)) return;
+  const updates = {};
+  if(huidigeEigenaarId){
+    updates["leden/" + huidigeEigenaarId + "/eigenaar"] = false;
+    updates["leden/" + huidigeEigenaarId + "/rechten"] = { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true };
+  }
+  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
+  updates["leden/" + nieuwLedId + "/rechten"] = null;
+  db.ref("restaurants/" + code).update(updates).then(() => {
+    toonToast(`${nieuweEigenaar.naam} is nu eigenaar van ${gegevens.naam}`);
+  });
+}
 // Wijzigt je naam SITE-BREED — je site-brede identiteit (Sitebeheer > Gebruikers, en de
 // standaardnaam bij een volgend restaurant maken/joinen) én je naam bij elk restaurant waar
 // je op dit toestel lid van bent, allemaal in één keer. Mag door elk teamlid, ook de eigenaar
@@ -1040,15 +1081,16 @@ function bansLuisteren(){
     render();
   });
 }
-// Blokkeert een apparaat voor het opgegeven aantal dagen, of voor onbepaalde tijd als
-// dagen null is. Overschrijft een eventuele bestaande blokkade van dat apparaat.
-function beheerGebruikerBlokkeren(apparaatId, dagen){
+// Blokkeert een apparaat voor de opgegeven duur (in milliseconden), of voor onbepaalde tijd
+// als duurMs null/0 is. Overschrijft een eventuele bestaande blokkade van dat apparaat.
+// duurLabel is puur voor de toast-melding.
+function beheerGebruikerBlokkeren(apparaatId, duurMs, duurLabel){
   const gebruiker = state.gebruikersLijst[apparaatId];
   const naam = gebruiker ? gebruiker.naam : apparaatId;
   const payload = { naam, sinds: firebase.database.ServerValue.TIMESTAMP };
-  if(dagen) payload.totEnMet = Date.now() + dagen * 24 * 60 * 60 * 1000;
+  if(duurMs) payload.totEnMet = Date.now() + duurMs;
   db.ref("bans/" + apparaatId).set(payload).then(() => {
-    toonToast(dagen ? `${naam} geblokkeerd voor ${dagen} dag${dagen===1?"":"en"}` : `${naam} voor onbepaalde tijd geblokkeerd`);
+    toonToast(duurMs ? `${naam} geblokkeerd voor ${duurLabel}` : `${naam} voor onbepaalde tijd geblokkeerd`);
   });
 }
 function beheerGebruikerBlokkerenDagen(apparaatId){
@@ -1058,13 +1100,24 @@ function beheerGebruikerBlokkerenDagen(apparaatId){
   if(invoer === null) return;
   const dagen = parseInt(invoer, 10);
   if(!dagen || dagen < 1){ toonToast("Vul een geldig aantal dagen in (1 of meer)."); return; }
-  beheerGebruikerBlokkeren(apparaatId, dagen);
+  beheerGebruikerBlokkeren(apparaatId, dagen * 24 * 60 * 60 * 1000, `${dagen} dag${dagen===1?"":"en"}`);
+}
+// Kortdurende blokkade ("timeout") in minuten — voor als een hele dag te lang is, bijv.
+// iemand die tijdens een dienst even lastig doet en na een half uurtje weer welkom is.
+function beheerGebruikerBlokkerenTimeout(apparaatId){
+  const gebruiker = state.gebruikersLijst[apparaatId];
+  const naam = gebruiker ? gebruiker.naam : apparaatId;
+  const invoer = prompt(`Timeout voor "${naam}" — hoeveel minuten?`, "30");
+  if(invoer === null) return;
+  const minuten = parseInt(invoer, 10);
+  if(!minuten || minuten < 1){ toonToast("Vul een geldig aantal minuten in (1 of meer)."); return; }
+  beheerGebruikerBlokkeren(apparaatId, minuten * 60 * 1000, `${minuten} minuut${minuten===1?"":"en"}`);
 }
 function beheerGebruikerBlokkerenOneindig(apparaatId){
   const gebruiker = state.gebruikersLijst[apparaatId];
   const naam = gebruiker ? gebruiker.naam : apparaatId;
   if(!confirm(`"${naam}" voor onbepaalde tijd blokkeren?`)) return;
-  beheerGebruikerBlokkeren(apparaatId, null);
+  beheerGebruikerBlokkeren(apparaatId, null, null);
 }
 // Heft een blokkade op — werkt ook voor een blokkade die op "oneindig" stond.
 function beheerGebruikerDeblokkeren(apparaatId){
@@ -1540,7 +1593,11 @@ function renderBeheerPaneel(){
             </div>
             <div class="beheer-rest-rij__leden">
               ${eigenaarLid ? `<span class="beheer-rest-rij__eigenaar">👤 ${eigenaarLid[1].naam}<span class="team-rij__badge" style="margin-left:6px;">Eigenaar</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
-              ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">Team: ${overigeLeden.map(([,l]) => l.naam).join(", ")}</span>` : ""}
+              ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">
+                Team: ${overigeLeden.map(([lid_id,l]) =>
+                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-maken" data-restaurant="${code}" data-id="${lid_id}" title="Eigenaarschap overzetten naar ${l.naam}">→ eigenaar</button>`
+                ).join(" · ")}
+              </span>` : ""}
             </div>
             ${r.waarschuwing ? `
               <div class="beheer-rest-rij__waarschuwing">
@@ -1566,7 +1623,7 @@ function renderBeheerPaneel(){
         const eersteDatum = g.eersteBezoek ? new Date(g.eersteBezoek).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "?";
         const laatsteDatum = g.laatsteBezoek ? new Date(g.laatsteBezoek).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "?";
         const statusHtml = nogActief
-          ? `<span class="team-rij__badge" style="border-color:var(--ember); color:var(--ember);">${oneindig ? "Geblokkeerd · oneindig" : "Geblokkeerd tot " + new Date(ban.totEnMet).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"})}</span>`
+          ? `<span class="team-rij__badge" style="border-color:var(--ember); color:var(--ember);">${oneindig ? "Geblokkeerd · oneindig" : "Geblokkeerd tot " + new Date(ban.totEnMet).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`
           : ban ? `<span class="team-rij__badge">Blokkade verlopen</span>` : "";
         return `
         <div class="beheer-rest-rij">
@@ -1577,7 +1634,8 @@ function renderBeheerPaneel(){
           <div class="beheer-rest-rij__acties">
             ${nogActief
               ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
-              : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
+              : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${apparaatId}">Timeout (minuten)</button>
+                 <button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
                  <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${apparaatId}">Blokkeer oneindig</button>`}
           </div>
         </div>`;
@@ -2091,6 +2149,7 @@ function renderInstellingenAlgemeen(){
                     ${r.label}
                   </label>`).join("")}
               </div>
+              <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}">Maak eigenaar</button>
               <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
             `}
           </div>`).join("")}
@@ -2516,6 +2575,7 @@ root.addEventListener("click", e => {
       break;
 
     case "lid-verwijderen": ledVerwijderen(id); break;
+    case "lid-eigenaar-maken": ledEigenaarschapOverzetten(id); break;
 
     case "instellingen-subtab": state.instellingenTab = el.dataset.tab; render(); break;
     case "eigen-naam-opslaan":
@@ -2600,6 +2660,8 @@ root.addEventListener("click", e => {
     case "site-naam-opslaan":
       siteNaamOpslaan(document.getElementById("input-site-naam").value);
       break;
+    case "beheer-lid-eigenaar-maken": beheerLidEigenaarMaken(el.dataset.restaurant, id); break;
+    case "gebruiker-blokkeren-timeout": beheerGebruikerBlokkerenTimeout(id); break;
     case "gebruiker-blokkeren-dagen": beheerGebruikerBlokkerenDagen(id); break;
     case "gebruiker-blokkeren-oneindig": beheerGebruikerBlokkerenOneindig(id); break;
     case "gebruiker-deblokkeren": beheerGebruikerDeblokkeren(id); break;
