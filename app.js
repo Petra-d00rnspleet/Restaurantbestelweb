@@ -105,7 +105,7 @@ const state = {
 const MERKNAAM = "Restaurants";
 const MAX_RESTAURANTS_PER_PERSOON = 2;
 const MAX_PRODUCTEN_PER_BESTELLING = 20; // max. totaal aantal producten (som van aantallen) in één bestelling
-const MAX_LETTERS_PRODUCTNAAM = 10;      // max. aantal tekens voor een productnaam
+const MAX_LETTERS_PRODUCTNAAM = 20;      // max. aantal tekens voor een productnaam
 const MAX_LETTERS_SITE_NAAM = 20;        // max. aantal tekens voor de site-brede gebruikersnaam
 
 // Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
@@ -1359,7 +1359,47 @@ function qrPrinten(){
 // ============================================================
 // RENDER
 // ============================================================
+// ---------- focus/waarde behouden bij een re-render ----------
+// Zonder dit springt de cursor uit een invoerveld (en kan zelfs net getypte tekst verdwijnen)
+// zodra er, terwijl je aan het typen bent, ergens anders een live update binnenkomt (bv. een
+// nieuwe bestelling) die een render() triggert — want render() vervangt de hele DOM-boom.
+// Deze twee helpers onthouden welk veld actief was (op id, of anders op data-action+data-id)
+// mét de actuele waarde en cursorpositie, en zetten dat na de re-render weer terug.
+function huidigeFocusVastleggen(){
+  const el = document.activeElement;
+  if(!el || !root.contains(el) || !("value" in el)) return null;
+  return {
+    id: el.id || null,
+    action: el.dataset ? el.dataset.action || null : null,
+    dataId: el.dataset ? (el.dataset.id != null ? el.dataset.id : null) : null,
+    waarde: el.value,
+    selStart: (typeof el.selectionStart === "number") ? el.selectionStart : null,
+    selEnd: (typeof el.selectionEnd === "number") ? el.selectionEnd : null,
+  };
+}
+function focusHerstellen(bewaard){
+  if(!bewaard) return;
+  let el = null;
+  if(bewaard.id) el = document.getElementById(bewaard.id);
+  if(!el && bewaard.action){
+    const selector = bewaard.dataId != null
+      ? `[data-action="${bewaard.action}"][data-id="${CSS.escape(bewaard.dataId)}"]`
+      : `[data-action="${bewaard.action}"]`;
+    el = root.querySelector(selector);
+  }
+  if(!el || !("value" in el)) return;
+  el.value = bewaard.waarde;
+  el.focus();
+  if(bewaard.selStart !== null && typeof el.setSelectionRange === "function"){
+    try{ el.setSelectionRange(bewaard.selStart, bewaard.selEnd); }catch(err){ /* niet elk inputtype ondersteunt dit */ }
+  }
+}
 function render(){
+  const bewaardeFocus = huidigeFocusVastleggen();
+  renderScherm();
+  focusHerstellen(bewaardeFocus);
+}
+function renderScherm(){
   // Blokkade-check gaat altijd voor: nog niet binnengekomen? Toon even niets ingrijpends
   // (voorkomt dat de site al even zichtbaar is vóór we weten of dit apparaat geblokkeerd is).
   if(!state.geblokkeerdGecontroleerd){
