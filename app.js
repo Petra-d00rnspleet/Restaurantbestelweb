@@ -60,7 +60,7 @@ const state = {
   gebruikersNaam: null,        // jouw eigen naam
   mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam}] — max 2 per apparaat
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
-  landingScherm: "start",     // start | maken | joinen
+  landingScherm: "start",     // start | maken | joinen | feedback
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
   instellingenTab: "algemeen", // algemeen | producten | achtergrond | plattegrond
   menu: {},
@@ -1024,9 +1024,10 @@ function sitebeheerPogingenLuisteren(){
 function sitebeheerPogingVerwijderen(id){
   db.ref("sitebeheer_pogingen/" + id).remove();
 }
-// Stuurt een bericht van een restaurant-eigenaar naar sitebeheer (bijv. "ik zou graag X willen").
-// Dit werkt zonder inloggen — net als de rest van de app voor teamleden — en komt terecht in een
-// apart, alleen-voor-ingelogde-beheerders-leesbaar deel van de database (zie readme.md).
+// Stuurt een bericht van een bezoeker naar sitebeheer (bijv. "ik zou graag X willen"), vanaf het
+// aparte "Bericht naar sitebeheer"-vak op het startscherm. Dit werkt zonder inloggen — net als de
+// rest van de app voor teamleden — en komt terecht in een apart, alleen-voor-ingelogde-beheerders-
+// leesbaar deel van de database (zie readme.md).
 const FEEDBACK_WACHTTIJD_MS = 5 * 60 * 1000; // maar 1x per 5 minuten een bericht naar sitebeheer
 function feedbackWachttijdOver(){
   const laatst = Number(localStorage.getItem("ticket_feedback_laatst") || 0);
@@ -1041,24 +1042,14 @@ function feedbackVersturen(tekst){
     toonToast(`Je kunt maar 1x per 5 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
     return;
   }
-  // Kan zowel vanuit Instellingen (al in een restaurant) als vanaf het startscherm (nog geen
-  // restaurant gekozen) verstuurd worden — restaurantgegevens zijn dan simpelweg leeg.
-  const eigenLid = state.actiefInRestaurant ? state.leden[state.ledId] : null;
-  const payload = {
-    afzender: (eigenLid && eigenLid.naam) || state.gebruikersNaam || state.siteGebruikersNaam || "(onbekend)",
+  db.ref("feedback").push({
+    afzender: state.gebruikersNaam || state.siteGebruikersNaam || "(onbekend)",
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  };
-  if(state.actiefInRestaurant){
-    payload.restaurantCode = state.restaurantCode;
-    payload.restaurantNaam = state.restaurantNaam;
-  }
-  db.ref("feedback").push(payload).then(() => {
+  }).then(() => {
     localStorage.setItem("ticket_feedback_laatst", String(Date.now()));
-    ["feedback-tekst", "feedback-tekst-start"].forEach(elId => {
-      const veld = document.getElementById(elId);
-      if(veld) veld.value = "";
-    });
+    const veld = document.getElementById("feedback-tekst");
+    if(veld) veld.value = "";
     toonToast("Bericht verstuurd naar sitebeheer");
   });
 }
@@ -1075,27 +1066,16 @@ function feedbackVerwijderen(id){
 // ---------- blokkade-berichten (bezwaar/appeal tussen geblokkeerd apparaat en sitebeheer) ----------
 // Een geblokkeerd apparaat kan sitebeheer een bericht sturen (bijv. "dit is een vergissing");
 // sitebeheer kan daar in het beheerpaneel op reageren. Het gesprek staat onder de blokkade zelf
-// (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check.
-const BAN_BERICHT_WACHTTIJD_MS = 2 * 60 * 1000; // maar 1x per 2 minuten een bericht als geblokkeerd apparaat
-function banBerichtWachttijdOver(){
-  const laatst = Number(localStorage.getItem("ticket_ban_bericht_laatst") || 0);
-  const resterendMs = laatst + BAN_BERICHT_WACHTTIJD_MS - Date.now();
-  return resterendMs > 0 ? Math.ceil(resterendMs / 60000) : 0;
-}
+// (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check. Geen
+// wachttijd hier — iemand die al geblokkeerd is, mag gewoon normaal (door)praten met sitebeheer.
 function banBerichtVersturenGebruiker(tekst){
   tekst = (tekst || "").trim();
   if(!tekst || !state.geblokkeerd) return;
-  const minutenOver = banBerichtWachttijdOver();
-  if(minutenOver > 0){
-    toonToast(`Je kunt maar 1x per 2 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
-    return;
-  }
   db.ref("bans/" + state.apparaatId + "/berichten").push({
     van: "gebruiker",
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   }).then(() => {
-    localStorage.setItem("ticket_ban_bericht_laatst", String(Date.now()));
     const veld = document.getElementById("ban-bericht-tekst");
     if(veld) veld.value = "";
     toonToast("Bericht verstuurd naar sitebeheer");
@@ -1531,8 +1511,6 @@ function renderGeblokkeerd(){
           <div class="ban-chat__tekst">${b.tekst}</div>
         </div>`).join("")}
     </div>` : "";
-  const minutenOverBan = banBerichtWachttijdOver();
-  const banGeblokkeerd = minutenOverBan > 0;
   root.innerHTML = `
     <div class="landing">
       <div class="landing__mark">
@@ -1544,8 +1522,8 @@ function renderGeblokkeerd(){
         <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
         <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Stuur hieronder een bericht naar sitebeheer — die kan je hier weer antwoorden.</p>
         ${berichtenHtml}
-        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" ${banGeblokkeerd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
-        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen" ${banGeblokkeerd?"disabled":""}>${banGeblokkeerd ? `Wacht nog ${minutenOverBan} minuut${minutenOverBan===1?"":"en"}` : "Versturen"}</button>
+        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
+        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen">Versturen</button>
       </div>
       <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
     </div>`;
@@ -1597,16 +1575,6 @@ function renderLanding(){
       </div>` : `
       <p class="landing__limiet">Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum. Vraag een eigenaar om je als teamlid te verwijderen, of vraag sitebeheer om een restaurant te verwijderen, om weer plek te maken.</p>`;
 
-    const feedbackMinutenOverStart = feedbackWachttijdOver();
-    const feedbackGeblokkeerdStart = feedbackMinutenOverStart > 0;
-    const feedbackHtmlStart = `
-      <div class="form-card" style="margin-top:20px;">
-        <div class="form-card__label" style="margin-bottom:2px;">💬 Bericht naar sitebeheer</div>
-        <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
-        <textarea id="feedback-tekst-start" rows="3" placeholder="Bijv. Ik zou graag ook..." ${feedbackGeblokkeerdStart?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
-        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen-start" ${feedbackGeblokkeerdStart?"disabled":""}>${feedbackGeblokkeerdStart ? `Wacht nog ${feedbackMinutenOverStart} minuut${feedbackMinutenOverStart===1?"":"en"}` : "Versturen"}</button>
-      </div>`;
-
     root.innerHTML = `
       <div class="landing">
         ${merk}
@@ -1614,7 +1582,12 @@ function renderLanding(){
         ${restaurantsHtml}
         ${keuzesHtml}
         ${nieuwsHtml}
-        ${feedbackHtmlStart}
+        <div class="landing__choices" style="margin-top:14px;">
+          <button class="choice-card" data-action="ga-feedback">
+            <div class="choice-card__title">💬 Bericht naar sitebeheer</div>
+            <p class="choice-card__desc">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
+          </button>
+        </div>
         <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
       </div>`;
   } else if(state.landingScherm === "maken"){
@@ -1652,6 +1625,20 @@ function renderLanding(){
       state.siteGebruikersNaam
     );
     document.getElementById("input-code").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
+  } else if(state.landingScherm === "feedback"){
+    const feedbackMinutenOverStart = feedbackWachttijdOver();
+    const feedbackGeblokkeerdStart = feedbackMinutenOverStart > 0;
+    root.innerHTML = `
+      <div class="landing">
+        ${merk}
+        <div class="form-card">
+          <label class="form-card__label">Bericht naar sitebeheer</label>
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}. Je kunt maar 1x per 5 minuten een bericht sturen.</p>
+          <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." ${feedbackGeblokkeerdStart?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
+          <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen" ${feedbackGeblokkeerdStart?"disabled":""}>${feedbackGeblokkeerdStart ? `Wacht nog ${feedbackMinutenOverStart} minuut${feedbackMinutenOverStart===1?"":"en"}` : "Versturen"}</button>
+          <button class="terug-link" data-action="terug-landing">← Terug</button>
+        </div>
+      </div>`;
   }
 }
 
@@ -1813,7 +1800,7 @@ function renderBeheerPaneel(){
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
-        <span class="update-lijst__titel">${f.afzender || "(onbekend)"} — ${f.restaurantNaam || "?"} (${f.restaurantCode || "?"})</span>
+        <span class="update-lijst__titel">${f.afzender || "(onbekend)"}${f.restaurantNaam ? ` — ${f.restaurantNaam} (${f.restaurantCode || "?"})` : ""}</span>
         <span>${f.tekst}</span>
       </div>
       <button class="verwijder-x" data-action="feedback-verwijderen" data-id="${id}" title="Verwerkt, wegklikken">✕</button>
@@ -2341,18 +2328,6 @@ function renderInstellingenAlgemeen(){
       <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
     </div>
 
-    ${isEigenaar ? (() => {
-      const feedbackMinutenOver = feedbackWachttijdOver();
-      const feedbackGeblokkeerd = feedbackMinutenOver > 0;
-      return `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">💬 Bericht naar sitebeheer</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Wil je iets aan ${MERKNAAM} verbeterd zien? Stuur het rechtstreeks naar de bouwer van de site. Je kunt maar 1x per 5 minuten een bericht sturen.</p>
-      <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." ${feedbackGeblokkeerd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
-      <button class="btn btn--flame" style="margin-top:10px;" data-action="feedback-versturen" ${feedbackGeblokkeerd?"disabled":""}>${feedbackGeblokkeerd ? `Wacht nog ${feedbackMinutenOver} minuut${feedbackMinutenOver===1?"":"en"}` : "Versturen"}</button>
-    </div>`;
-    })() : ""}
-
     <div class="instel-blok">
       <div class="instel-blok__titel">Dit restaurant</div>
       ${state.beheerBezoekModus ? `
@@ -2627,6 +2602,7 @@ root.addEventListener("click", e => {
   switch(action){
     case "ga-maken": state.landingScherm="maken"; state.foutmelding=""; render(); break;
     case "ga-joinen": state.landingScherm="joinen"; state.foutmelding=""; render(); break;
+    case "ga-feedback": state.landingScherm="feedback"; state.foutmelding=""; render(); break;
     case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
     case "maak-restaurant":
       restaurantMaken(
@@ -2703,7 +2679,6 @@ root.addEventListener("click", e => {
     case "site-update-verwijder": siteUpdateVerwijderen(id); break;
     case "poging-verwijder": sitebeheerPogingVerwijderen(id); break;
     case "feedback-versturen": feedbackVersturen(document.getElementById("feedback-tekst").value); break;
-    case "feedback-versturen-start": feedbackVersturen(document.getElementById("feedback-tekst-start").value); break;
     case "feedback-verwijderen": feedbackVerwijderen(id); break;
     case "ban-bericht-versturen": banBerichtVersturenGebruiker(document.getElementById("ban-bericht-tekst").value); break;
     case "beheer-ban-chat-togglen": beheerBanChatTogglen(id); break;
