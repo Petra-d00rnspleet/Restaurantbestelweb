@@ -1066,20 +1066,51 @@ function feedbackVerwijderen(id){
 // ---------- blokkade-berichten (bezwaar/appeal tussen geblokkeerd apparaat en sitebeheer) ----------
 // Een geblokkeerd apparaat kan sitebeheer een bericht sturen (bijv. "dit is een vergissing");
 // sitebeheer kan daar in het beheerpaneel op reageren. Het gesprek staat onder de blokkade zelf
-// (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check. Geen
-// wachttijd hier — iemand die al geblokkeerd is, mag gewoon normaal (door)praten met sitebeheer.
+// (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check.
+// Net als bij "Bericht naar sitebeheer" op het startscherm geldt hier een wachttijd, zodat een
+// geblokkeerd apparaat niet eindeloos berichten achter elkaar kan sturen.
+const BAN_BERICHT_WACHTTIJD_MS = 2 * 60 * 1000; // maar 1x per 2 minuten een bericht sturen
+function banBerichtWachttijdOver(){
+  const laatst = Number(localStorage.getItem("ticket_ban_bericht_laatst") || 0);
+  const resterendMs = laatst + BAN_BERICHT_WACHTTIJD_MS - Date.now();
+  return resterendMs > 0 ? Math.ceil(resterendMs / 60000) : 0;
+}
 function banBerichtVersturenGebruiker(tekst){
   tekst = (tekst || "").trim();
   if(!tekst || !state.geblokkeerd) return;
+  if(state.geblokkeerd.berichtenGeblokkeerd){
+    toonToast("Sitebeheer heeft de berichtenfunctie voor jou uitgezet.");
+    return;
+  }
+  const minutenOver = banBerichtWachttijdOver();
+  if(minutenOver > 0){
+    toonToast(`Je kunt maar 1x per 2 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
+    return;
+  }
   db.ref("bans/" + state.apparaatId + "/berichten").push({
     van: "gebruiker",
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   }).then(() => {
+    localStorage.setItem("ticket_ban_bericht_laatst", String(Date.now()));
     const veld = document.getElementById("ban-bericht-tekst");
     if(veld) veld.value = "";
     toonToast("Bericht verstuurd naar sitebeheer");
+    render();
   });
+}
+// Sitebeheer zet de berichtenfunctie van een geblokkeerd apparaat aan of uit — bijv. als iemand
+// het bezwaar-kanaal misbruikt om te blijven spammen terwijl ze al geblokkeerd zijn.
+function beheerBanBerichtenBlokkeren(apparaatId){
+  db.ref("bans/" + apparaatId + "/berichtenGeblokkeerd").set(true).then(() => toonToast("Berichtenfunctie uitgezet voor dit apparaat"));
+}
+function beheerBanBerichtenDeblokkeren(apparaatId){
+  db.ref("bans/" + apparaatId + "/berichtenGeblokkeerd").remove().then(() => toonToast("Berichtenfunctie weer aangezet"));
+}
+// Sitebeheer verwijdert het hele bezwaar-gesprek met een (voorheen) geblokkeerd apparaat.
+function beheerBanChatVerwijderen(apparaatId){
+  if(!confirm("Dit hele gesprek verwijderen? Dit kan niet ongedaan gemaakt worden.")) return;
+  db.ref("bans/" + apparaatId + "/berichten").remove().then(() => toonToast("Gesprek verwijderd"));
 }
 // Antwoord van sitebeheer terug naar een geblokkeerd apparaat.
 function banBerichtVersturenBeheer(apparaatId, tekst){
@@ -1511,6 +1542,14 @@ function renderGeblokkeerd(){
           <div class="ban-chat__tekst">${b.tekst}</div>
         </div>`).join("")}
     </div>` : "";
+  const berichtenGeblokkeerd = !!info.berichtenGeblokkeerd;
+  const minutenOverBericht = berichtenGeblokkeerd ? 0 : banBerichtWachttijdOver();
+  const berichtVeldUit = berichtenGeblokkeerd || minutenOverBericht > 0;
+  const berichtStatusHtml = berichtenGeblokkeerd
+    ? `<p style="color:var(--ember); font-size:.8rem; margin-top:8px;">Sitebeheer heeft de berichtenfunctie hier uitgezet.</p>`
+    : minutenOverBericht > 0
+      ? `<p style="color:var(--text-dim); font-size:.8rem; margin-top:8px;">Je kunt over ${minutenOverBericht} minuut${minutenOverBericht===1?"":"en"} weer een bericht sturen.</p>`
+      : "";
   root.innerHTML = `
     <div class="landing">
       <div class="landing__mark">
@@ -1522,8 +1561,9 @@ function renderGeblokkeerd(){
         <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
         <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Stuur hieronder een bericht naar sitebeheer — die kan je hier weer antwoorden.</p>
         ${berichtenHtml}
-        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
-        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen">Versturen</button>
+        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" ${berichtVeldUit?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
+        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen" ${berichtVeldUit?"disabled":""}>Versturen</button>
+        ${berichtStatusHtml}
       </div>
       <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
     </div>`;
@@ -1738,6 +1778,7 @@ function renderBeheerPaneel(){
         const berichtenArr = Object.entries((ban && ban.berichten) || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
         const chatOpen = state.beheerBanChatOpenId === apparaatId;
         const chatToggleHtml = ban ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-chat-togglen" data-id="${apparaatId}">💬 Bericht${berichtenArr.length ? ` (${berichtenArr.length})` : ""}</button>` : "";
+        const berichtenGeblokkeerd = !!(ban && ban.berichtenGeblokkeerd);
         const chatPaneelHtml = chatOpen ? `
           <div class="ban-chat ban-chat--beheer">
             ${berichtenArr.length ? berichtenArr.map(([id,b]) => `
@@ -1746,7 +1787,14 @@ function renderBeheerPaneel(){
                 <div class="ban-chat__tekst">${b.tekst}</div>
               </div>`).join("") : `<div class="leeg" style="padding:6px 0;">Nog geen berichten.</div>`}
             <textarea id="beheer-ban-bericht-tekst-${apparaatId}" rows="2" placeholder="Antwoord versturen…" style="width:100%; resize:vertical; font-family:inherit; font-size:.85rem; padding:8px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:8px;"></textarea>
-            <button class="btn btn--flame btn--sm" style="margin-top:6px;" data-action="beheer-ban-bericht-versturen" data-id="${apparaatId}">Versturen</button>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+              <button class="btn btn--flame btn--sm" data-action="beheer-ban-bericht-versturen" data-id="${apparaatId}">Versturen</button>
+              ${berichtenGeblokkeerd
+                ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-berichten-deblokkeren" data-id="${apparaatId}">Berichtenfunctie weer aanzetten</button>`
+                : `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-berichten-blokkeren" data-id="${apparaatId}">Berichtenfunctie uitzetten</button>`}
+              ${berichtenArr.length ? `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-chat-verwijderen" data-id="${apparaatId}">Gesprek verwijderen</button>` : ""}
+            </div>
+            ${berichtenGeblokkeerd ? `<p style="color:var(--ember); font-size:.75rem; margin-top:6px;">Deze gebruiker kan momenteel geen berichten meer sturen.</p>` : ""}
           </div>` : "";
         return `
         <div class="beheer-rest-rij" style="flex-direction:column; align-items:stretch;">
@@ -2683,6 +2731,9 @@ root.addEventListener("click", e => {
     case "ban-bericht-versturen": banBerichtVersturenGebruiker(document.getElementById("ban-bericht-tekst").value); break;
     case "beheer-ban-chat-togglen": beheerBanChatTogglen(id); break;
     case "beheer-ban-bericht-versturen": banBerichtVersturenBeheer(id, document.getElementById("beheer-ban-bericht-tekst-" + id).value); break;
+    case "beheer-ban-berichten-blokkeren": beheerBanBerichtenBlokkeren(id); break;
+    case "beheer-ban-berichten-deblokkeren": beheerBanBerichtenDeblokkeren(id); break;
+    case "beheer-ban-chat-verwijderen": beheerBanChatVerwijderen(id); break;
     case "site-update-bewerken": siteUpdateBewerkStarten(id); break;
     case "site-update-bewerk-annuleren": siteUpdateBewerkAnnuleren(); break;
     case "site-update-opslaan":
