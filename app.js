@@ -84,6 +84,7 @@ const state = {
   gebruikersLijst: {},             // alle apparaten die ooit een naam hebben ingevuld (alleen geladen als het beheerpaneel open is)
   gebruikersLijstGeladen: false,
   bansLijst: {},                   // alle actieve/verlopen blokkades (alleen geladen als het beheerpaneel open is)
+  beheerBanChatOpenId: null,       // apparaatId waarvan het berichten-paneel nu open staat in sitebeheer, of null
   beheerderActief: false,  // wordt gezet door Firebase Auth (zie onAuthStateChanged onderaan), niet meer lokaal opgeslagen
   beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
   beheerFoutmelding: "",
@@ -1040,17 +1041,24 @@ function feedbackVersturen(tekst){
     toonToast(`Je kunt maar 1x per 5 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
     return;
   }
-  const eigenLid = state.leden[state.ledId];
-  db.ref("feedback").push({
-    restaurantCode: state.restaurantCode,
-    restaurantNaam: state.restaurantNaam,
-    afzender: (eigenLid && eigenLid.naam) || state.gebruikersNaam || "(onbekend)",
+  // Kan zowel vanuit Instellingen (al in een restaurant) als vanaf het startscherm (nog geen
+  // restaurant gekozen) verstuurd worden — restaurantgegevens zijn dan simpelweg leeg.
+  const eigenLid = state.actiefInRestaurant ? state.leden[state.ledId] : null;
+  const payload = {
+    afzender: (eigenLid && eigenLid.naam) || state.gebruikersNaam || state.siteGebruikersNaam || "(onbekend)",
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => {
+  };
+  if(state.actiefInRestaurant){
+    payload.restaurantCode = state.restaurantCode;
+    payload.restaurantNaam = state.restaurantNaam;
+  }
+  db.ref("feedback").push(payload).then(() => {
     localStorage.setItem("ticket_feedback_laatst", String(Date.now()));
-    const veld = document.getElementById("feedback-tekst");
-    if(veld) veld.value = "";
+    ["feedback-tekst", "feedback-tekst-start"].forEach(elId => {
+      const veld = document.getElementById(elId);
+      if(veld) veld.value = "";
+    });
     toonToast("Bericht verstuurd naar sitebeheer");
   });
 }
@@ -1063,6 +1071,54 @@ function feedbackLuisteren(){
 }
 function feedbackVerwijderen(id){
   db.ref("feedback/" + id).remove();
+}
+// ---------- blokkade-berichten (bezwaar/appeal tussen geblokkeerd apparaat en sitebeheer) ----------
+// Een geblokkeerd apparaat kan sitebeheer een bericht sturen (bijv. "dit is een vergissing");
+// sitebeheer kan daar in het beheerpaneel op reageren. Het gesprek staat onder de blokkade zelf
+// (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check.
+const BAN_BERICHT_WACHTTIJD_MS = 2 * 60 * 1000; // maar 1x per 2 minuten een bericht als geblokkeerd apparaat
+function banBerichtWachttijdOver(){
+  const laatst = Number(localStorage.getItem("ticket_ban_bericht_laatst") || 0);
+  const resterendMs = laatst + BAN_BERICHT_WACHTTIJD_MS - Date.now();
+  return resterendMs > 0 ? Math.ceil(resterendMs / 60000) : 0;
+}
+function banBerichtVersturenGebruiker(tekst){
+  tekst = (tekst || "").trim();
+  if(!tekst || !state.geblokkeerd) return;
+  const minutenOver = banBerichtWachttijdOver();
+  if(minutenOver > 0){
+    toonToast(`Je kunt maar 1x per 2 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
+    return;
+  }
+  db.ref("bans/" + state.apparaatId + "/berichten").push({
+    van: "gebruiker",
+    tekst: tekst,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => {
+    localStorage.setItem("ticket_ban_bericht_laatst", String(Date.now()));
+    const veld = document.getElementById("ban-bericht-tekst");
+    if(veld) veld.value = "";
+    toonToast("Bericht verstuurd naar sitebeheer");
+  });
+}
+// Antwoord van sitebeheer terug naar een geblokkeerd apparaat.
+function banBerichtVersturenBeheer(apparaatId, tekst){
+  tekst = (tekst || "").trim();
+  if(!tekst) return;
+  db.ref("bans/" + apparaatId + "/berichten").push({
+    van: "beheer",
+    tekst: tekst,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => {
+    const veld = document.getElementById("beheer-ban-bericht-tekst-" + apparaatId);
+    if(veld) veld.value = "";
+    toonToast("Antwoord verstuurd");
+  });
+}
+// Klapt het berichten-paneel bij een gebruiker in het sitebeheer-paneel open of dicht.
+function beheerBanChatTogglen(apparaatId){
+  state.beheerBanChatOpenId = state.beheerBanChatOpenId === apparaatId ? null : apparaatId;
+  render();
 }
 // ---------- gebruikers & blokkades (Sitebeheer) ----------
 // Luistert live naar alle apparaten die ooit een site-naam hebben ingevuld, alleen zolang
@@ -1466,6 +1522,17 @@ function renderGeblokkeerd(){
   const info = state.geblokkeerd;
   const oneindig = typeof info.totEnMet !== "number";
   const totTekst = oneindig ? "" : `, tot ${new Date(info.totEnMet).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}`;
+  const berichtenArr = Object.entries(info.berichten || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
+  const berichtenHtml = berichtenArr.length ? `
+    <div class="ban-chat">
+      ${berichtenArr.map(([id,b]) => `
+        <div class="ban-chat__bericht ban-chat__bericht--${b.van==='beheer'?'beheer':'gebruiker'}">
+          <div class="ban-chat__afzender">${b.van==='beheer' ? 'Sitebeheer' : 'Jij'}</div>
+          <div class="ban-chat__tekst">${b.tekst}</div>
+        </div>`).join("")}
+    </div>` : "";
+  const minutenOverBan = banBerichtWachttijdOver();
+  const banGeblokkeerd = minutenOverBan > 0;
   root.innerHTML = `
     <div class="landing">
       <div class="landing__mark">
@@ -1475,7 +1542,10 @@ function renderGeblokkeerd(){
       </div>
       <div class="form-card">
         <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
-        <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Neem contact op met de beheerder.</p>
+        <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Stuur hieronder een bericht naar sitebeheer — die kan je hier weer antwoorden.</p>
+        ${berichtenHtml}
+        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" ${banGeblokkeerd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
+        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen" ${banGeblokkeerd?"disabled":""}>${banGeblokkeerd ? `Wacht nog ${minutenOverBan} minuut${minutenOverBan===1?"":"en"}` : "Versturen"}</button>
       </div>
       <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
     </div>`;
@@ -1527,6 +1597,16 @@ function renderLanding(){
       </div>` : `
       <p class="landing__limiet">Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum. Vraag een eigenaar om je als teamlid te verwijderen, of vraag sitebeheer om een restaurant te verwijderen, om weer plek te maken.</p>`;
 
+    const feedbackMinutenOverStart = feedbackWachttijdOver();
+    const feedbackGeblokkeerdStart = feedbackMinutenOverStart > 0;
+    const feedbackHtmlStart = `
+      <div class="form-card" style="margin-top:20px;">
+        <div class="form-card__label" style="margin-bottom:2px;">💬 Bericht naar sitebeheer</div>
+        <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
+        <textarea id="feedback-tekst-start" rows="3" placeholder="Bijv. Ik zou graag ook..." ${feedbackGeblokkeerdStart?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
+        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen-start" ${feedbackGeblokkeerdStart?"disabled":""}>${feedbackGeblokkeerdStart ? `Wacht nog ${feedbackMinutenOverStart} minuut${feedbackMinutenOverStart===1?"":"en"}` : "Versturen"}</button>
+      </div>`;
+
     root.innerHTML = `
       <div class="landing">
         ${merk}
@@ -1534,6 +1614,7 @@ function renderLanding(){
         ${restaurantsHtml}
         ${keuzesHtml}
         ${nieuwsHtml}
+        ${feedbackHtmlStart}
         <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
       </div>`;
   } else if(state.landingScherm === "maken"){
@@ -1665,19 +1746,38 @@ function renderBeheerPaneel(){
         const statusHtml = nogActief
           ? `<span class="team-rij__badge" style="border-color:var(--ember); color:var(--ember);">${oneindig ? "Geblokkeerd · oneindig" : "Geblokkeerd tot " + new Date(ban.totEnMet).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`
           : ban ? `<span class="team-rij__badge">Blokkade verlopen</span>` : "";
+        // Berichten (bezwaar/appeal) horen bij de blokkade zelf, dus alleen relevant als er
+        // ooit een blokkade is geweest.
+        const berichtenArr = Object.entries((ban && ban.berichten) || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
+        const chatOpen = state.beheerBanChatOpenId === apparaatId;
+        const chatToggleHtml = ban ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-chat-togglen" data-id="${apparaatId}">💬 Bericht${berichtenArr.length ? ` (${berichtenArr.length})` : ""}</button>` : "";
+        const chatPaneelHtml = chatOpen ? `
+          <div class="ban-chat ban-chat--beheer">
+            ${berichtenArr.length ? berichtenArr.map(([id,b]) => `
+              <div class="ban-chat__bericht ban-chat__bericht--${b.van==='beheer'?'beheer':'gebruiker'}">
+                <div class="ban-chat__afzender">${b.van==='beheer' ? 'Jij (sitebeheer)' : (g.naam || '(onbekend)')}</div>
+                <div class="ban-chat__tekst">${b.tekst}</div>
+              </div>`).join("") : `<div class="leeg" style="padding:6px 0;">Nog geen berichten.</div>`}
+            <textarea id="beheer-ban-bericht-tekst-${apparaatId}" rows="2" placeholder="Antwoord versturen…" style="width:100%; resize:vertical; font-family:inherit; font-size:.85rem; padding:8px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:8px;"></textarea>
+            <button class="btn btn--flame btn--sm" style="margin-top:6px;" data-action="beheer-ban-bericht-versturen" data-id="${apparaatId}">Versturen</button>
+          </div>` : "";
         return `
-        <div class="beheer-rest-rij">
-          <div class="beheer-rest-rij__info">
-            <div class="beheer-rest-rij__naam">${g.naam || "(onbekend)"} ${statusHtml}</div>
-            <div class="beheer-rest-rij__meta">Eerste bezoek ${eersteDatum} · laatst gezien ${laatsteDatum}</div>
+        <div class="beheer-rest-rij" style="flex-direction:column; align-items:stretch;">
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
+            <div class="beheer-rest-rij__info">
+              <div class="beheer-rest-rij__naam">${g.naam || "(onbekend)"} ${statusHtml}</div>
+              <div class="beheer-rest-rij__meta">Eerste bezoek ${eersteDatum} · laatst gezien ${laatsteDatum}</div>
+            </div>
+            <div class="beheer-rest-rij__acties">
+              ${chatToggleHtml}
+              ${nogActief
+                ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
+                : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${apparaatId}">Timeout (minuten)</button>
+                   <button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
+                   <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${apparaatId}">Blokkeer oneindig</button>`}
+            </div>
           </div>
-          <div class="beheer-rest-rij__acties">
-            ${nogActief
-              ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
-              : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${apparaatId}">Timeout (minuten)</button>
-                 <button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
-                 <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${apparaatId}">Blokkeer oneindig</button>`}
-          </div>
+          ${chatPaneelHtml}
         </div>`;
       }).join("");
 
@@ -2603,7 +2703,11 @@ root.addEventListener("click", e => {
     case "site-update-verwijder": siteUpdateVerwijderen(id); break;
     case "poging-verwijder": sitebeheerPogingVerwijderen(id); break;
     case "feedback-versturen": feedbackVersturen(document.getElementById("feedback-tekst").value); break;
+    case "feedback-versturen-start": feedbackVersturen(document.getElementById("feedback-tekst-start").value); break;
     case "feedback-verwijderen": feedbackVerwijderen(id); break;
+    case "ban-bericht-versturen": banBerichtVersturenGebruiker(document.getElementById("ban-bericht-tekst").value); break;
+    case "beheer-ban-chat-togglen": beheerBanChatTogglen(id); break;
+    case "beheer-ban-bericht-versturen": banBerichtVersturenBeheer(id, document.getElementById("beheer-ban-bericht-tekst-" + id).value); break;
     case "site-update-bewerken": siteUpdateBewerkStarten(id); break;
     case "site-update-bewerk-annuleren": siteUpdateBewerkAnnuleren(); break;
     case "site-update-opslaan":
