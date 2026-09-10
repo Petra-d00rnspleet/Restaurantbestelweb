@@ -76,12 +76,14 @@ Onderaan het startscherm (en onderaan Instellingen, als je al in een restaurant 
 - Elk restaurant **volledig verwijderen** (inclusief menu, bestellingen en historie) — dit kan niet ongedaan gemaakt worden.
 - De **systeemupdates** schrijven en verwijderen (titel + tekst) — dit stond eerder in het Instellingen-tabblad van elk restaurant, maar staat nu alleen nog hier.
 - De **inlogpogingen** van de laatste tijd zien (gelukt én mislukt, met tijdstip, naam en het ingevoerde e-mailadres) — zo zie je hier zelf of iemand geprobeerd heeft binnen te komen. Elke regel is met een ✕ weg te klikken. Na 3 mislukte pogingen achter elkaar wordt inloggen op dat apparaat/browser 15 minuten geblokkeerd (het inlogformulier toont dan hoelang nog); dit is een lokale blokkade per apparaat, dus geen vervanging voor een sterk wachtwoord.
-- **Feedback van eigenaren** lezen — elke restaurant-eigenaar kan in Instellingen → Algemeen een bericht sturen ("ik zou graag ... willen"); dat komt hier binnen met naam, restaurant en tijdstip, en is met ✕ weg te klikken zodra je het verwerkt hebt.
+- **Feedback van eigenaren én bezoekers** lezen — een restaurant-eigenaar kan in Instellingen → Algemeen een bericht sturen, en sinds kort kan iedereen dat ook al vóórdat ze een restaurant gekozen hebben, via een berichtvak onderaan het startscherm zelf. Elk bericht komt hier binnen met naam (en restaurant, als dat al bekend is) en tijdstip, en is met ✕ weg te klikken zodra je het verwerkt hebt. Maximaal 1 bericht per 5 minuten per apparaat.
 - **Gebruikers & blokkades**: hier zie je iedereen die ooit een naam heeft ingevuld op het startscherm (zie hierboven), met eerste en laatste bezoek. Per gebruiker kun je:
   - **Blokkeren voor X dagen** (je vult het aantal dagen in) of **blokkeren voor onbepaalde tijd** ("oneindig");
   - **Deblokkeren** — dit werkt ook voor een blokkade die op "oneindig" stond.
 
   Een blokkade is gekoppeld aan het **apparaat** (een willekeurig id dat lokaal wordt opgeslagen), niet alleen aan de ingevulde naam — een andere naam invullen op hetzelfde apparaat omzeilt de blokkade dus niet. Zolang iemand geblokkeerd is, ziet die persoon in plaats van de site een aparte pagina met "Toegang geblokkeerd", tot de dagen om zijn of jij 'm handmatig opheft. Wist iemand de eigen browsergegevens (localStorage), dan telt dat als een nieuw, ongeblokkeerd apparaat — net zoals de restaurantcode is dit een bewust lichte vorm van beveiliging, geen sluitend systeem.
+
+  Vanaf die "Toegang geblokkeerd"-pagina kan de geblokkeerde persoon ook een bericht sturen (bijv. "dit is een vergissing") — maximaal 1x per 2 minuten. Bij "Gebruikers & blokkades" verschijnt dan een knop **"💬 Bericht"** naast die gebruiker, met het hele gesprek en een antwoordveld; je antwoord verschijnt meteen (live) op de blokkade-pagina van die persoon, zodat je heen en weer kunt overleggen zonder ergens anders te hoeven mailen.
 
 Dit werkt met een **echt account via Firebase Authentication** — er staat geen wachtwoord meer ergens in de broncode. Zo stel je dat in:
 
@@ -152,7 +154,12 @@ Ga naar **Realtime Database → Regels** en zet:
     },
     "bans": {
       ".read": true,
-      ".write": "auth != null"
+      ".write": "auth != null",
+      "$apparaatId": {
+        "berichten": {
+          ".write": true
+        }
+      }
     }
   }
 }
@@ -166,6 +173,7 @@ Wat dit doet:
 - Feedback-berichten van restaurant-eigenaren (`feedback`) werken op dezelfde manier: schrijven kan zonder inloggen (want teamleden loggen nergens mee in), lezen kan alleen met een geldige inlogsessie.
 - `gebruikers` (de site-brede naamlijst) werkt ook zo: elk apparaat mag zijn eigen ingevulde naam wegschrijven zonder in te loggen, maar de hele lijst tegelijk opvragen (wat het Sitebeheer-paneel doet) kan alleen met een geldige inlogsessie.
 - `bans` is net andersom: **schrijven** (iemand blokkeren/deblokkeren) kan alleen met een geldige inlogsessie, maar **lezen** staat open — dat is nodig omdat elk apparaat zonder in te loggen moet kunnen checken of het zelf geblokkeerd is. Dit betekent dat de banlijst (namen + apparaat-id's) in theorie door iedereen is op te vragen die rechtstreeks met de database praat; net als bij de restaurantcode is dit een bewuste, lichte keuze, geen lek van gevoeligere gegevens dan een naam.
+- Onder elke blokkade mag het bijbehorende apparaat wél zonder inloggen schrijven naar `bans/$apparaatId/berichten` — dat is het bezwaar-gesprek met sitebeheer (zie hieronder). Dit overschrijft alleen dat ene subpad; de blokkade zelf (`bans/$apparaatId`) blijft verder gewoon alleen met een geldige inlogsessie te zetten of te verwijderen.
 
 ⚠️ Let op: de restaurantcode (`$code`) zelf werkt nog steeds als een soort "wachtwoord" voor dat ene restaurant — wie de code weet of raadt, kan dat restaurant lezen/wijzigen. Dat is een bewuste, lichte keuze van dit project (net als bij een tafelbon-code) en geen verkeerde configuratie; alleen het **sitebeheer-gedeelte** (alle restaurants + systeemupdates) is nu met een echt account afgeschermd.
 
