@@ -809,31 +809,25 @@ function ledEigenaarToevoegen(nieuwLedId){
     toonToast(`${nieuweEigenaar.naam} is nu ook eigenaar`);
   });
 }
-// Tegenhanger van hierboven: een eigenaar kan het eigenaarschap van een mede-eigenaar weer
-// intrekken (die persoon wordt dan gewoon teamlid met standaardrechten). Kan niet op jezelf
-// toegepast worden (gebruik daarvoor overzetten of verlaten) en niet als het de laatste
-// overgebleven eigenaar zou wegnemen — er moet altijd minstens één eigenaar overblijven.
-function ledEigenaarschapIntrekken(ledId){
+// Tegenhanger van hierboven: een eigenaar kan alleen zíjn/haar EIGEN eigenaarschap intrekken
+// (niet dat van een andere eigenaar) — je wordt dan gewoon teamlid met standaardrechten. Niet
+// mogelijk als je de laatste overgebleven eigenaar bent; draag dan eerst over via "Overzetten".
+function eigenEigenaarschapIntrekken(){
   const eigenLid = state.leden[state.ledId];
   if(!eigenLid || !eigenLid.eigenaar) return;
-  if(ledId === state.ledId) return;
-  const lid = state.leden[ledId];
-  if(!lid || !lid.eigenaar) return;
   const aantalEigenaren = Object.values(state.leden).filter(l => l.eigenaar).length;
-  if(aantalEigenaren <= 1){ toonToast("Er moet altijd minstens één eigenaar overblijven."); return; }
-  if(!confirm(`Eigenaarschap van "${lid.naam}" intrekken? Diegene wordt dan gewoon teamlid, met de standaardrechten.`)) return;
+  if(aantalEigenaren <= 1){ toonToast("Je bent de enige eigenaar — draag eerst over via 'Overzetten' voordat je zelf stopt als eigenaar."); return; }
+  if(!confirm("Je eigen eigenaarschap intrekken? Je wordt dan gewoon teamlid met de standaardrechten en kunt het team hierna niet meer beheren.")) return;
   const updates = {};
-  updates["leden/" + ledId + "/eigenaar"] = false;
-  updates["leden/" + ledId + "/rechten"] = STANDAARD_RECHTEN;
+  updates["leden/" + state.ledId + "/eigenaar"] = false;
+  updates["leden/" + state.ledId + "/rechten"] = STANDAARD_RECHTEN;
   db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
-    toonToast(`${lid.naam} is geen eigenaar meer`);
+    toonToast("Je bent geen eigenaar meer");
   });
 }
-// Sitebeheer-variant: voegt iemand toe als (mede-)eigenaar van een ánder restaurant dan waar
-// je zelf lid van bent (bijv. als geen van de bestaande eigenaren nog bereikbaar is). Voegt
-// alleen toe — bestaande eigenaren blijven gewoon eigenaar, dit is bewust een aanvullende,
-// beheerder-only actie en geen overname.
-function beheerLidEigenaarMaken(code, nieuwLedId){
+// Sitebeheer-variant "toevoegen": voegt iemand toe als (mede-)eigenaar van een ánder restaurant
+// dan waar je zelf lid van bent. Voegt alleen toe — bestaande eigenaren blijven gewoon eigenaar.
+function beheerLidEigenaarToevoegen(code, nieuwLedId){
   const gegevens = state.alleRestaurants[code];
   if(!gegevens) return;
   const leden = gegevens.leden || {};
@@ -845,6 +839,29 @@ function beheerLidEigenaarMaken(code, nieuwLedId){
   updates["leden/" + nieuwLedId + "/rechten"] = null;
   db.ref("restaurants/" + code).update(updates).then(() => {
     toonToast(`${nieuweEigenaar.naam} is nu (mede-)eigenaar van ${gegevens.naam}`);
+  });
+}
+// Sitebeheer-variant "overzetten": zet het eigenaarschap volledig over naar dit teamlid — alle
+// huidige eigenaren worden gewoon teamlid (met alle rechten, zodat ze niets kwijtraken), en dit
+// teamlid wordt de (enige) nieuwe eigenaar. Bedoeld voor als de bestaande eigenaren niet meer
+// bereikbaar zijn — een beheerder-only overrule-actie.
+function beheerLidEigenaarschapOverzetten(code, nieuwLedId){
+  const gegevens = state.alleRestaurants[code];
+  if(!gegevens) return;
+  const leden = gegevens.leden || {};
+  const nieuweEigenaar = leden[nieuwLedId];
+  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
+  const huidigeEigenarenIds = Object.keys(leden).filter(id => leden[id].eigenaar);
+  if(!confirm(`Als sitebeheer het eigenaarschap van "${gegevens.naam}" volledig overzetten naar "${nieuweEigenaar.naam}"? De huidige eigena${huidigeEigenarenIds.length===1?"ar wordt":"ren worden"} dan gewoon teamlid.`)) return;
+  const updates = {};
+  huidigeEigenarenIds.forEach(id => {
+    updates["leden/" + id + "/eigenaar"] = false;
+    updates["leden/" + id + "/rechten"] = { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true };
+  });
+  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
+  updates["leden/" + nieuwLedId + "/rechten"] = null;
+  db.ref("restaurants/" + code).update(updates).then(() => {
+    toonToast(`${nieuweEigenaar.naam} is nu eigenaar van ${gegevens.naam}`);
   });
 }
 // Wijzigt je naam SITE-BREED — je site-brede identiteit (Sitebeheer > Gebruikers, en de
@@ -1762,7 +1779,7 @@ function renderBeheerPaneel(){
               ${eigenarenArr.length ? `<span class="beheer-rest-rij__eigenaar">${eigenarenArr.map(([,l]) => `👤 ${l.naam}`).join(" · ")}<span class="team-rij__badge" style="margin-left:6px;">${eigenarenArr.length > 1 ? "Eigenaren" : "Eigenaar"}</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
               ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">
                 Team: ${overigeLeden.map(([lid_id,l]) =>
-                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-maken" data-restaurant="${code}" data-id="${lid_id}" title="${l.naam} toevoegen als (mede-)eigenaar">+ eigenaar</button>`
+                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-toevoegen" data-restaurant="${code}" data-id="${lid_id}" title="${l.naam} toevoegen als (mede-)eigenaar">+</button> <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-overzetten" data-restaurant="${code}" data-id="${lid_id}" title="Eigenaarschap volledig overzetten naar ${l.naam}">⇄</button>`
                 ).join(" · ")}
               </span>` : ""}
             </div>
@@ -2326,36 +2343,53 @@ function renderInstellingenAlgemeen(){
   const isEigenaar = !!(eigenLid && eigenLid.eigenaar);
   const ledenArr = Object.entries(state.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
 
-  const teamHtml = isEigenaar ? `
+  const teamHtml = `
     <div class="instel-blok">
       <div class="instel-blok__titel">Team &amp; rechten</div>
-      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Stel per teamlid een functie en rechten in — dat bepaalt welke tabbladen diegene te zien krijgt.</p>
+      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">${isEigenaar ? "Stel per teamlid een functie en rechten in — dat bepaalt welke tabbladen diegene te zien krijgt." : "Zo ziet het team er nu uit. Alleen een eigenaar kan dit hier aanpassen."}</p>
       <div class="team-lijst">
-        ${ledenArr.map(([id, lid]) => `
-          <div class="team-rij">
-            <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
-            ${lid.eigenaar
-              ? (id !== state.ledId ? `
-                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaarschap-intrekken" data-id="${id}" title="Eigenaarschap van ${lid.naam} intrekken">Eigenaarschap intrekken</button>
-                ` : "")
-              : `
+        ${ledenArr.map(([id, lid]) => {
+          const isZelf = id === state.ledId;
+          if(!isEigenaar){
+            // Alleen-lezen weergave: iedereen mag het team zien, maar niet aanpassen.
+            const rechtenTekst = lid.eigenaar
+              ? "Alle rechten"
+              : (RECHTEN_DEFINITIES.filter(r => lid.rechten && lid.rechten[r.key]).map(r => r.label).join(", ") || "Geen rechten");
+            return `
+              <div class="team-rij">
+                <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
+                ${lid.functie ? `<div style="color:var(--text-dim); font-size:.82rem;">${lid.functie}</div>` : ""}
+                <div style="color:var(--text-dim); font-size:.78rem;">${rechtenTekst}</div>
+              </div>`;
+          }
+          // Eigenaar-weergave: bewerkbaar, ook voor rijen van (andere) eigenaren.
+          return `
+            <div class="team-rij">
+              <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
               <input class="team-rij__functie" placeholder="Functie, bijv. Ober" value="${lid.functie||""}" data-action="functie-wijzigen" data-id="${id}">
-              <div class="team-rij__rechten">
-                ${RECHTEN_DEFINITIES.map(r => `
-                  <label class="team-recht">
-                    <input type="checkbox" data-action="recht-toggle" data-id="${id}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
-                    ${r.label}
-                  </label>`).join("")}
-              </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${id}" title="${lid.naam} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
-                <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}" title="Eigenaarschap overzetten naar ${lid.naam} — jij wordt dan zelf teamlid">⇄ Overzetten</button>
-              </div>
-              <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
-            `}
-          </div>`).join("")}
+              ${lid.eigenaar ? `
+                <div style="color:var(--text-dim); font-size:.78rem;">Eigenaren hebben altijd alle rechten.</div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  ${isZelf ? `<button class="btn btn--ghost btn--sm" data-action="eigen-eigenaarschap-intrekken" title="Je eigen eigenaarschap intrekken">Eigenaarschap intrekken</button>` : ""}
+                </div>
+              ` : `
+                <div class="team-rij__rechten">
+                  ${RECHTEN_DEFINITIES.map(r => `
+                    <label class="team-recht">
+                      <input type="checkbox" data-action="recht-toggle" data-id="${id}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
+                      ${r.label}
+                    </label>`).join("")}
+                </div>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${id}" title="${lid.naam} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
+                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}" title="Eigenaarschap overzetten naar ${lid.naam} — jij wordt dan zelf teamlid">⇄ Overzetten</button>
+                </div>
+                <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
+              `}
+            </div>`;
+        }).join("")}
       </div>
-    </div>` : "";
+    </div>`;
 
   return `
     <div class="instel-blok">
@@ -2773,7 +2807,7 @@ root.addEventListener("click", e => {
     case "lid-verwijderen": ledVerwijderen(id); break;
     case "lid-eigenaar-maken": ledEigenaarschapOverzetten(id); break;
     case "lid-eigenaar-toevoegen": ledEigenaarToevoegen(id); break;
-    case "lid-eigenaarschap-intrekken": ledEigenaarschapIntrekken(id); break;
+    case "eigen-eigenaarschap-intrekken": eigenEigenaarschapIntrekken(); break;
 
     case "instellingen-subtab": state.instellingenTab = el.dataset.tab; render(); break;
     case "eigen-naam-opslaan":
@@ -2858,7 +2892,8 @@ root.addEventListener("click", e => {
     case "site-naam-opslaan":
       siteNaamOpslaan(document.getElementById("input-site-naam").value);
       break;
-    case "beheer-lid-eigenaar-maken": beheerLidEigenaarMaken(el.dataset.restaurant, id); break;
+    case "beheer-lid-eigenaar-toevoegen": beheerLidEigenaarToevoegen(el.dataset.restaurant, id); break;
+    case "beheer-lid-eigenaar-overzetten": beheerLidEigenaarschapOverzetten(el.dataset.restaurant, id); break;
     case "gebruiker-blokkeren-timeout": beheerGebruikerBlokkerenTimeout(id); break;
     case "gebruiker-blokkeren-dagen": beheerGebruikerBlokkerenDagen(id); break;
     case "gebruiker-blokkeren-oneindig": beheerGebruikerBlokkerenOneindig(id); break;
