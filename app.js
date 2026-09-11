@@ -792,26 +792,59 @@ function ledEigenaarschapOverzetten(nieuwLedId){
     toonToast(`${nieuweEigenaar.naam} is nu eigenaar`);
   });
 }
-// Sitebeheer-variant hiervan: grijpt in bij een ánder restaurant dan waar je zelf lid van
-// bent (bijv. als de eigenaar niet meer bereikbaar is). Vraagt geen bevestiging van de
-// vorige eigenaar — dit is bewust een beheerder-only overrule-actie.
+// Een restaurant mag meerdere eigenaren tegelijk hebben. De eigenaar voegt een bestaand
+// teamlid toe als mede-eigenaar — dat teamlid krijgt volledige rechten, ernaast blijf je
+// zelf ook gewoon eigenaar (in tegenstelling tot overzetten hierboven, dat je eigen
+// eigenaarschap juist beëindigt).
+function ledEigenaarToevoegen(nieuwLedId){
+  const eigenLid = state.leden[state.ledId];
+  if(!eigenLid || !eigenLid.eigenaar) return;
+  const nieuweEigenaar = state.leden[nieuwLedId];
+  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
+  if(!confirm(`"${nieuweEigenaar.naam}" toevoegen als mede-eigenaar? Diegene krijgt dan dezelfde volledige rechten als jij — je blijft daarnaast zelf ook gewoon eigenaar.`)) return;
+  const updates = {};
+  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
+  updates["leden/" + nieuwLedId + "/rechten"] = null;
+  db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
+    toonToast(`${nieuweEigenaar.naam} is nu ook eigenaar`);
+  });
+}
+// Tegenhanger van hierboven: een eigenaar kan het eigenaarschap van een mede-eigenaar weer
+// intrekken (die persoon wordt dan gewoon teamlid met standaardrechten). Kan niet op jezelf
+// toegepast worden (gebruik daarvoor overzetten of verlaten) en niet als het de laatste
+// overgebleven eigenaar zou wegnemen — er moet altijd minstens één eigenaar overblijven.
+function ledEigenaarschapIntrekken(ledId){
+  const eigenLid = state.leden[state.ledId];
+  if(!eigenLid || !eigenLid.eigenaar) return;
+  if(ledId === state.ledId) return;
+  const lid = state.leden[ledId];
+  if(!lid || !lid.eigenaar) return;
+  const aantalEigenaren = Object.values(state.leden).filter(l => l.eigenaar).length;
+  if(aantalEigenaren <= 1){ toonToast("Er moet altijd minstens één eigenaar overblijven."); return; }
+  if(!confirm(`Eigenaarschap van "${lid.naam}" intrekken? Diegene wordt dan gewoon teamlid, met de standaardrechten.`)) return;
+  const updates = {};
+  updates["leden/" + ledId + "/eigenaar"] = false;
+  updates["leden/" + ledId + "/rechten"] = STANDAARD_RECHTEN;
+  db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
+    toonToast(`${lid.naam} is geen eigenaar meer`);
+  });
+}
+// Sitebeheer-variant: voegt iemand toe als (mede-)eigenaar van een ánder restaurant dan waar
+// je zelf lid van bent (bijv. als geen van de bestaande eigenaren nog bereikbaar is). Voegt
+// alleen toe — bestaande eigenaren blijven gewoon eigenaar, dit is bewust een aanvullende,
+// beheerder-only actie en geen overname.
 function beheerLidEigenaarMaken(code, nieuwLedId){
   const gegevens = state.alleRestaurants[code];
   if(!gegevens) return;
   const leden = gegevens.leden || {};
   const nieuweEigenaar = leden[nieuwLedId];
   if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
-  const huidigeEigenaarId = Object.keys(leden).find(id => leden[id].eigenaar);
-  if(!confirm(`Als sitebeheer het eigenaarschap van "${gegevens.naam}" overzetten naar "${nieuweEigenaar.naam}"?`)) return;
+  if(!confirm(`Als sitebeheer "${nieuweEigenaar.naam}" toevoegen als (mede-)eigenaar van "${gegevens.naam}"?`)) return;
   const updates = {};
-  if(huidigeEigenaarId){
-    updates["leden/" + huidigeEigenaarId + "/eigenaar"] = false;
-    updates["leden/" + huidigeEigenaarId + "/rechten"] = { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true };
-  }
   updates["leden/" + nieuwLedId + "/eigenaar"] = true;
   updates["leden/" + nieuwLedId + "/rechten"] = null;
   db.ref("restaurants/" + code).update(updates).then(() => {
-    toonToast(`${nieuweEigenaar.naam} is nu eigenaar van ${gegevens.naam}`);
+    toonToast(`${nieuweEigenaar.naam} is nu (mede-)eigenaar van ${gegevens.naam}`);
   });
 }
 // Wijzigt je naam SITE-BREED — je site-brede identiteit (Sitebeheer > Gebruikers, en de
@@ -1067,14 +1100,9 @@ function feedbackVerwijderen(id){
 // Een geblokkeerd apparaat kan sitebeheer een bericht sturen (bijv. "dit is een vergissing");
 // sitebeheer kan daar in het beheerpaneel op reageren. Het gesprek staat onder de blokkade zelf
 // (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check.
-// Net als bij "Bericht naar sitebeheer" op het startscherm geldt hier een wachttijd, zodat een
-// geblokkeerd apparaat niet eindeloos berichten achter elkaar kan sturen.
-const BAN_BERICHT_WACHTTIJD_MS = 2 * 60 * 1000; // maar 1x per 2 minuten een bericht sturen
-function banBerichtWachttijdOver(){
-  const laatst = Number(localStorage.getItem("ticket_ban_bericht_laatst") || 0);
-  const resterendMs = laatst + BAN_BERICHT_WACHTTIJD_MS - Date.now();
-  return resterendMs > 0 ? Math.ceil(resterendMs / 60000) : 0;
-}
+// Geen wachttijd tussen berichten: een geblokkeerd apparaat kan gewoon doorchatten met
+// sitebeheer totdat sitebeheer de berichtenfunctie voor dat apparaat expliciet uitzet
+// (zie beheerBanBerichtenBlokkeren hieronder) — dat is de enige rem op dit kanaal.
 function banBerichtVersturenGebruiker(tekst){
   tekst = (tekst || "").trim();
   if(!tekst || !state.geblokkeerd) return;
@@ -1082,17 +1110,11 @@ function banBerichtVersturenGebruiker(tekst){
     toonToast("Sitebeheer heeft de berichtenfunctie voor jou uitgezet.");
     return;
   }
-  const minutenOver = banBerichtWachttijdOver();
-  if(minutenOver > 0){
-    toonToast(`Je kunt maar 1x per 2 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
-    return;
-  }
   db.ref("bans/" + state.apparaatId + "/berichten").push({
     van: "gebruiker",
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   }).then(() => {
-    localStorage.setItem("ticket_ban_bericht_laatst", String(Date.now()));
     const veld = document.getElementById("ban-bericht-tekst");
     if(veld) veld.value = "";
     toonToast("Bericht verstuurd naar sitebeheer");
@@ -1543,13 +1565,10 @@ function renderGeblokkeerd(){
         </div>`).join("")}
     </div>` : "";
   const berichtenGeblokkeerd = !!info.berichtenGeblokkeerd;
-  const minutenOverBericht = berichtenGeblokkeerd ? 0 : banBerichtWachttijdOver();
-  const berichtVeldUit = berichtenGeblokkeerd || minutenOverBericht > 0;
+  const berichtVeldUit = berichtenGeblokkeerd;
   const berichtStatusHtml = berichtenGeblokkeerd
     ? `<p style="color:var(--ember); font-size:.8rem; margin-top:8px;">Sitebeheer heeft de berichtenfunctie hier uitgezet.</p>`
-    : minutenOverBericht > 0
-      ? `<p style="color:var(--text-dim); font-size:.8rem; margin-top:8px;">Je kunt over ${minutenOverBericht} minuut${minutenOverBericht===1?"":"en"} weer een bericht sturen.</p>`
-      : "";
+    : "";
   root.innerHTML = `
     <div class="landing">
       <div class="landing__mark">
@@ -1722,7 +1741,7 @@ function renderBeheerPaneel(){
     : restaurantsArr.length === 0 ? `<div class="leeg">Nog geen restaurants aangemaakt.</div>`
     : restaurantsArr.map(([code, r]) => {
         const ledenArr = Object.entries(r.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
-        const eigenaarLid = ledenArr.find(([,l]) => l.eigenaar);
+        const eigenarenArr = ledenArr.filter(([,l]) => l.eigenaar);
         const overigeLeden = ledenArr.filter(([,l]) => !l.eigenaar);
         const aantalLeden = ledenArr.length;
         const aantalProducten = Object.keys(r.menu || {}).length;
@@ -1740,10 +1759,10 @@ function renderBeheerPaneel(){
               ${datum ? ` · aangemaakt ${datum}` : ""}
             </div>
             <div class="beheer-rest-rij__leden">
-              ${eigenaarLid ? `<span class="beheer-rest-rij__eigenaar">👤 ${eigenaarLid[1].naam}<span class="team-rij__badge" style="margin-left:6px;">Eigenaar</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
+              ${eigenarenArr.length ? `<span class="beheer-rest-rij__eigenaar">${eigenarenArr.map(([,l]) => `👤 ${l.naam}`).join(" · ")}<span class="team-rij__badge" style="margin-left:6px;">${eigenarenArr.length > 1 ? "Eigenaren" : "Eigenaar"}</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
               ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">
                 Team: ${overigeLeden.map(([lid_id,l]) =>
-                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-maken" data-restaurant="${code}" data-id="${lid_id}" title="Eigenaarschap overzetten naar ${l.naam}">→ eigenaar</button>`
+                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-maken" data-restaurant="${code}" data-id="${lid_id}" title="${l.naam} toevoegen als (mede-)eigenaar">+ eigenaar</button>`
                 ).join(" · ")}
               </span>` : ""}
             </div>
@@ -2315,7 +2334,11 @@ function renderInstellingenAlgemeen(){
         ${ledenArr.map(([id, lid]) => `
           <div class="team-rij">
             <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
-            ${lid.eigenaar ? "" : `
+            ${lid.eigenaar
+              ? (id !== state.ledId ? `
+                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaarschap-intrekken" data-id="${id}" title="Eigenaarschap van ${lid.naam} intrekken">Eigenaarschap intrekken</button>
+                ` : "")
+              : `
               <input class="team-rij__functie" placeholder="Functie, bijv. Ober" value="${lid.functie||""}" data-action="functie-wijzigen" data-id="${id}">
               <div class="team-rij__rechten">
                 ${RECHTEN_DEFINITIES.map(r => `
@@ -2324,7 +2347,10 @@ function renderInstellingenAlgemeen(){
                     ${r.label}
                   </label>`).join("")}
               </div>
-              <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}">Maak eigenaar</button>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${id}" title="${lid.naam} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
+                <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}" title="Eigenaarschap overzetten naar ${lid.naam} — jij wordt dan zelf teamlid">⇄ Overzetten</button>
+              </div>
               <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
             `}
           </div>`).join("")}
@@ -2746,6 +2772,8 @@ root.addEventListener("click", e => {
 
     case "lid-verwijderen": ledVerwijderen(id); break;
     case "lid-eigenaar-maken": ledEigenaarschapOverzetten(id); break;
+    case "lid-eigenaar-toevoegen": ledEigenaarToevoegen(id); break;
+    case "lid-eigenaarschap-intrekken": ledEigenaarschapIntrekken(id); break;
 
     case "instellingen-subtab": state.instellingenTab = el.dataset.tab; render(); break;
     case "eigen-naam-opslaan":
