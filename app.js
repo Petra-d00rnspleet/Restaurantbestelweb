@@ -56,6 +56,7 @@ let apparaatIsNieuw = false; // true als dit apparaat/browser hier voor het eers
 const state = {
   restaurantCode: null,
   restaurantNaam: null,
+  naamLimiet: null,            // eigen letterlimiet voor de restaurantnaam, indien sitebeheer die heeft ingesteld (anders MAX_LETTERS_RESTAURANTNAAM)
   ledId: null,                 // jouw teamlid-id binnen dit restaurant
   gebruikersNaam: null,        // jouw eigen naam
   mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam}] — max 2 per apparaat
@@ -212,12 +213,18 @@ function gebruikerRegistreren(){
   }
   db.ref("gebruikers/" + state.apparaatId).update(payload);
 }
-const MAX_LETTERS_RESTAURANTNAAM = 10;   // max. aantal tekens voor een restaurantnaam
+const MAX_LETTERS_RESTAURANTNAAM = 10;   // standaardlimiet aantal tekens voor een restaurantnaam, tenzij sitebeheer voor dit restaurant een eigen limiet heeft ingesteld
+// De limiet die nu voor dít restaurant geldt: de eigen limiet van sitebeheer (state.naamLimiet)
+// als die gezet is, anders gewoon de standaardlimiet.
+function effectieveNaamLimiet(){
+  return (typeof state.naamLimiet === "number" && state.naamLimiet > 0) ? state.naamLimiet : MAX_LETTERS_RESTAURANTNAAM;
+}
 function restaurantNaamWijzigen(nieuweNaam){
   nieuweNaam = (nieuweNaam || "").trim();
   if(!nieuweNaam) return;
-  if(nieuweNaam.length > MAX_LETTERS_RESTAURANTNAAM){
-    toonToast(`Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.`);
+  const limiet = effectieveNaamLimiet();
+  if(nieuweNaam.length > limiet){
+    toonToast(`Een restaurantnaam mag maximaal ${limiet} letters bevatten.`);
     return;
   }
   db.ref("restaurants/" + state.restaurantCode + "/naam").set(nieuweNaam).then(() => {
@@ -353,6 +360,7 @@ function verlaatHuidigRestaurant(){
   const code = state.restaurantCode;
   if(code){
     db.ref("restaurants/" + code + "/naam").off();
+    db.ref("restaurants/" + code + "/naamLimiet").off();
     db.ref("restaurants/" + code + "/menu").off();
     db.ref("restaurants/" + code + "/bestellingen").off();
     db.ref("restaurants/" + code + "/historie").off();
@@ -364,6 +372,7 @@ function verlaatHuidigRestaurant(){
   }
   state.restaurantCode = null;
   state.restaurantNaam = null;
+  state.naamLimiet = null;
   state.ledId = null;
   state.gebruikersNaam = null;
   state.leden = {};
@@ -573,6 +582,12 @@ function startRestaurant(){
       mijnRestaurantVerwijderenUitLijst(code);
       verlaatHuidigRestaurant();
     }
+  });
+  // Sitebeheer kan per restaurant een eigen letterlimiet voor de restaurantnaam instellen —
+  // zolang die niet gezet is, geldt gewoon de standaardlimiet (MAX_LETTERS_RESTAURANTNAAM).
+  db.ref("restaurants/" + code + "/naamLimiet").on("value", snap => {
+    state.naamLimiet = snap.exists() ? snap.val() : null;
+    render();
   });
   db.ref("restaurants/" + code + "/menu").on("value", snap => {
     state.menu = snap.val() || {};
@@ -1315,6 +1330,24 @@ function beheerRestaurantWaarschuwen(code){
 function beheerRestaurantWaarschuwingIntrekken(code){
   db.ref("restaurants/" + code + "/waarschuwing").remove().then(() => toonToast("Waarschuwing ingetrokken"));
 }
+// Sitebeheer kan per restaurant een eigen letterlimiet instellen voor de restaurantnaam — dat
+// telt zowel bij het hernoemen in Instellingen als (via effectieveNaamLimiet) overal waar die
+// limiet gebruikt wordt. Leeg/0 invullen zet 'm terug naar de standaardlimiet.
+function beheerRestaurantNaamLimiet(code){
+  const gegevens = state.alleRestaurants[code];
+  const naam = gegevens ? gegevens.naam : code;
+  const huidige = gegevens && gegevens.naamLimiet ? String(gegevens.naamLimiet) : "";
+  const invoer = prompt(`Letterlimiet voor de restaurantnaam van "${naam}" (${code}) — laat leeg voor de standaardlimiet van ${MAX_LETTERS_RESTAURANTNAAM}:`, huidige);
+  if(invoer === null) return;
+  const schoon = invoer.trim();
+  if(!schoon){
+    db.ref("restaurants/" + code + "/naamLimiet").remove().then(() => toonToast(`Naamlimiet van ${naam} teruggezet naar standaard (${MAX_LETTERS_RESTAURANTNAAM})`));
+    return;
+  }
+  const limiet = parseInt(schoon, 10);
+  if(!limiet || limiet < 1){ toonToast("Vul een geldig aantal letters in (1 of meer), of laat leeg voor standaard."); return; }
+  db.ref("restaurants/" + code + "/naamLimiet").set(limiet).then(() => toonToast(`Naamlimiet van ${naam} ingesteld op ${limiet} letters`));
+}
 // Sluit de waarschuwing-banner vanuit het restaurant zelf (door een teamlid) — verwijdert 'm
 // voor iedereen, net als sitebeheer dat ook zou kunnen doen.
 function waarschuwingSluiten(){
@@ -1762,6 +1795,7 @@ function renderBeheerPaneel(){
               ${aantalLeden} teamlid${aantalLeden===1?"":"en"} · ${aantalProducten} product${aantalProducten===1?"":"en"} ·
               ${aantalOpenstaand} openstaande bestelling${aantalOpenstaand===1?"":"en"} · ${aantalHistorie} in historie
               ${datum ? ` · aangemaakt ${datum}` : ""}
+              · naamlimiet ${r.naamLimiet ? `${r.naamLimiet} letters` : `standaard (${MAX_LETTERS_RESTAURANTNAAM})`}
             </div>
             <div class="beheer-rest-rij__leden">
               ${eigenarenArr.length ? `<span class="beheer-rest-rij__eigenaar">${eigenarenArr.map(([,l]) => `👤 ${l.naam}`).join(" · ")}<span class="team-rij__badge" style="margin-left:6px;">${eigenarenArr.length > 1 ? "Eigenaren" : "Eigenaar"}</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
@@ -1779,6 +1813,7 @@ function renderBeheerPaneel(){
           </div>
           <div class="beheer-rest-rij__acties">
             <button class="btn btn--steel btn--sm" data-action="beheer-bezoeken" data-id="${code}">Bezoeken</button>
+            <button class="btn btn--ghost btn--sm" data-action="beheer-naamlimiet" data-id="${code}">Naamlimiet</button>
             <button class="btn btn--ghost btn--sm" data-action="beheer-waarschuwen" data-id="${code}">${r.waarschuwing ? "Waarschuwing aanpassen" : "Waarschuwen"}</button>
             <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-verwijderen" data-id="${code}">Verwijderen</button>
           </div>
@@ -2393,10 +2428,10 @@ function renderInstellingenAlgemeen(){
       <div class="instel-blok__titel">Restaurantnaam</div>
       ${heeftRecht('instellingen') ? `
         <div class="naam-wijzig-form">
-          <input id="restaurant-naam-invoer" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" value="${state.restaurantNaam}">
+          <input id="restaurant-naam-invoer" maxlength="${effectieveNaamLimiet()}" value="${state.restaurantNaam}">
           <button class="btn btn--flame btn--sm" data-action="naam-opslaan">Opslaan</button>
         </div>
-        <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>` : `<div>${state.restaurantNaam}</div>`}
+        <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Een restaurantnaam mag maximaal ${effectieveNaamLimiet()} letters bevatten.</p>` : `<div>${state.restaurantNaam}</div>`}
     </div>
 
     <div class="instel-blok">
@@ -2763,6 +2798,7 @@ root.addEventListener("click", e => {
     case "beheer-bezoeken": beheerRestaurantBezoeken(id); break;
     case "beheer-verwijderen": beheerRestaurantVerwijderen(id); break;
     case "beheer-waarschuwen": beheerRestaurantWaarschuwen(id); break;
+    case "beheer-naamlimiet": beheerRestaurantNaamLimiet(id); break;
     case "beheer-waarschuwing-intrekken": beheerRestaurantWaarschuwingIntrekken(id); break;
     case "waarschuwing-sluiten": waarschuwingSluiten(); break;
     case "beheer-terug-paneel": beheerRestaurantVerlaten(); break;
