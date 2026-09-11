@@ -121,11 +121,11 @@ const RECHTEN_DEFINITIES = [
 ];
 
 const EMOJI_CATEGORIEEN = {
-  "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙"],
-  "Warme maaltijd": ["🍝","🍜","🍲","🍛","🍱","🍣","🥘","🫕","🍳","🥟"],
-  "Groente & fruit": ["🥗","🍎","🍌","🍊","🍇","🍓","🍉","🥑","🥕","🍒","🍍","🥝","🍑","🥭"],
-  "Bakkerij & zoet": ["🍰","🧁","🍩","🍪","🍦","🍫","🍮","🥧","🥐","🍯"],
-  "Dranken": ["🥤","☕","🍺","🍷","🍹","🧃","🍵","🥃","🧉","🥛"],
+  "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙","🥩","🍖","🧆"],
+  "Warme maaltijd": ["🍝","🍜","🍲","🍛","🍱","🍣","🥘","🫕","🍳","🥟","🍤","🫓","🥡"],
+  "Groente & fruit": ["🥗","🍎","🍌","🍊","🍇","🍓","🍉","🥑","🥕","🍒","🍍","🥝","🍑","🥭","🍋","🍅","🌽","🥦"],
+  "Bakkerij & zoet": ["🍰","🧁","🍩","🍪","🍦","🍫","🍮","🥧","🥐","🍯","🍭","🍬","🥯"],
+  "Dranken": ["🥤","☕","🍺","🍷","🍹","🧃","🍵","🥃","🧉","🥛","🍸","🧋"],
 };
 
 // Patronen die als subtiele achtergrondtextuur gekozen kunnen worden (naast een eigen kleur).
@@ -2523,7 +2523,7 @@ function renderInstellingenProducten(){
     </div>
 
     <div class="instel-blok">
-      <div class="instel-blok__titel">${bewerkItem ? "Product bewerken" : "Producten"}</div>
+      <div class="instel-blok__titel">${bewerkItem ? "Product bewerken" : `Producten <span style="color:var(--text-dim); font-weight:400; font-size:.85rem;">(${menuArr.length})</span>`}</div>
       <div class="menu-form">
         <div class="emoji-kiezer">
           <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
