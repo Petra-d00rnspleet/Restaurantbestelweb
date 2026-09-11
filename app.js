@@ -1078,26 +1078,16 @@ function sitebeheerPogingVerwijderen(id){
 // aparte "Bericht naar sitebeheer"-vak op het startscherm. Dit werkt zonder inloggen — net als de
 // rest van de app voor teamleden — en komt terecht in een apart, alleen-voor-ingelogde-beheerders-
 // leesbaar deel van de database (zie readme.md).
-const FEEDBACK_WACHTTIJD_MS = 5 * 60 * 1000; // maar 1x per 5 minuten een bericht naar sitebeheer
-function feedbackWachttijdOver(){
-  const laatst = Number(localStorage.getItem("ticket_feedback_laatst") || 0);
-  const resterendMs = laatst + FEEDBACK_WACHTTIJD_MS - Date.now();
-  return resterendMs > 0 ? Math.ceil(resterendMs / 60000) : 0;
-}
+// Geen wachttijd: iedereen kan hier gewoon zo vaak sturen als nodig is — als sitebeheer spam wil
+// voorkomen, kan dat via een blokkade van dat apparaat (zie hieronder).
 function feedbackVersturen(tekst){
   tekst = (tekst || "").trim();
   if(!tekst) return;
-  const minutenOver = feedbackWachttijdOver();
-  if(minutenOver > 0){
-    toonToast(`Je kunt maar 1x per 5 minuten een bericht sturen — probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`);
-    return;
-  }
   db.ref("feedback").push({
     afzender: state.gebruikersNaam || state.siteGebruikersNaam || "(onbekend)",
     tekst: tekst,
     tijdstip: firebase.database.ServerValue.TIMESTAMP,
   }).then(() => {
-    localStorage.setItem("ticket_feedback_laatst", String(Date.now()));
     const veld = document.getElementById("feedback-tekst");
     if(veld) veld.value = "";
     toonToast("Bericht verstuurd naar sitebeheer");
@@ -1702,16 +1692,14 @@ function renderLanding(){
     );
     document.getElementById("input-code").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
   } else if(state.landingScherm === "feedback"){
-    const feedbackMinutenOverStart = feedbackWachttijdOver();
-    const feedbackGeblokkeerdStart = feedbackMinutenOverStart > 0;
     root.innerHTML = `
       <div class="landing">
         ${merk}
         <div class="form-card">
           <label class="form-card__label">Bericht naar sitebeheer</label>
-          <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}. Je kunt maar 1x per 5 minuten een bericht sturen.</p>
-          <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." ${feedbackGeblokkeerdStart?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
-          <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen" ${feedbackGeblokkeerdStart?"disabled":""}>${feedbackGeblokkeerdStart ? `Wacht nog ${feedbackMinutenOverStart} minuut${feedbackMinutenOverStart===1?"":"en"}` : "Versturen"}</button>
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
+          <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
+          <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen">Versturen</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
       </div>`;
