@@ -119,6 +119,14 @@ const RECHTEN_DEFINITIES = [
   { key:"historie",     label:"Historie" },
   { key:"instellingen", label:"Instellingen" },
 ];
+// Tabbladen waarvoor je het meldinggeluid apart aan/uit kunt zetten — meerdere tegelijk mag.
+const MELDING_VIEWS_DEFINITIES = [
+  { key:"bestellen", label:"Bestellen 🛒" },
+  { key:"keuken",    label:"Keuken 🍳" },
+  { key:"bezorgen",  label:"Bezorgen 🚚" },
+  { key:"historie",  label:"Historie 🕓" },
+  { key:"voorraad",  label:"Voorraad 📦" },
+];
 
 const EMOJI_CATEGORIEEN = {
   "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙","🥩","🍖","🧆"],
@@ -301,6 +309,13 @@ function geluidAfspelen(url, duurSeconden){
 function themaGeluidKiezen(key){
   themaWijzigen("geluid", key);
 }
+// Per tabblad (Bestellen/Keuken/Bezorgen/Historie/Voorraad) aan of uit — meerdere tegelijk aan
+// mag. Wordt per apparaat/tabblad losstaand gecheckt in speelMeldingsGeluidAf hieronder: het
+// geluid gaat alleen af op het apparaat dat op dát moment op zo'n aangevinkt tabblad staat.
+function themaGeluidViewToggle(viewKey){
+  const huidigeViews = (state.thema && state.thema.geluidViews) || { keuken: true };
+  db.ref("restaurants/" + state.restaurantCode + "/thema/geluidViews/" + viewKey).set(!huidigeViews[viewKey]);
+}
 // Leest een door de gebruiker gekozen bestand in en slaat 'm als data-URI op in het thema
 // van dit restaurant (er is geen Firebase Storage nodig, dit gaat gewoon via de database net
 // als de rest van het thema) — geldt daardoor automatisch voor alle apparaten van dit restaurant.
@@ -332,11 +347,13 @@ function themaEigenGeluidVerwijderen(){
     geluidEigenNaam: null,
   });
 }
-// Bepaalt welk geluid nu actief staat voor dit restaurant en speelt het af — gebeurt alleen
-// voor teamleden met het "Keuken"-recht (of de eigenaar/beheerder), zodat gasten via de
-// zelfbestel-pagina er niets van merken.
+// Bepaalt welk geluid nu actief staat voor dit restaurant en speelt het af — maar alléén op dít
+// apparaat, en alléén als dit apparaat op dít moment op een tabblad staat dat hierboven is
+// aangevinkt (zie themaGeluidViewToggle). Staat er niets aangevinkt (nog niet ingesteld), dan
+// geldt Keuken als standaard, zoals voorheen.
 function speelMeldingsGeluidAf(){
-  if(!heeftRecht("keuken")) return;
+  const viewsAan = (state.thema && state.thema.geluidViews) || { keuken: true };
+  if(!viewsAan[state.huidigeView]) return;
   const thema = state.thema || {};
   if(thema.geluid === "eigen" && thema.geluidEigenData){
     geluidAfspelen(thema.geluidEigenData, thema.geluidDuur);
@@ -2626,6 +2643,12 @@ function renderInstellingenAchtergrond(){
       <button type="button" class="geluid-optie__preview" data-action="geluid-eigen-preview" title="Beluister">▶</button>
       <button type="button" class="geluid-optie__verwijder" data-action="geluid-eigen-verwijderen" title="Verwijderen">🗑️</button>
     </div>` : "";
+  const geluidViewsHuidig = huidig.geluidViews || { keuken: true };
+  const geluidViewsHtml = MELDING_VIEWS_DEFINITIES.map(v => `
+    <label class="menu-form__optie">
+      <input type="checkbox" data-action="thema-geluid-view" data-view="${v.key}" ${geluidViewsHuidig[v.key] ? "checked" : ""}>
+      ${v.label}
+    </label>`).join("");
 
   return `
     <div class="instel-blok">
@@ -2671,7 +2694,7 @@ function renderInstellingenAchtergrond(){
 
     <div class="instel-blok">
       <div class="instel-blok__titel">🔊 Meldinggeluid bij nieuwe bestelling</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Speelt af in de Keuken zodra er een nieuwe bestelling binnenkomt (alleen bij teamleden met het Keuken-recht). Upload hieronder je eigen geluidsbestand, of zet het uit.</p>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Upload hieronder je eigen geluidsbestand, of zet het uit.</p>
       <div class="geluid-rij">
         ${geluidGeenHtml}
         ${eigenGeluidHtml}
@@ -2688,6 +2711,10 @@ function renderInstellingenAchtergrond(){
             placeholder="heel geluid" value="${huidig.geluidDuur || ""}" data-action="geluid-duur">
           <span>sec (minimaal ${GELUID_MIN_DUUR} sec)</span>
         </div>` : ""}
+      <p style="color:var(--text-dim); font-size:.82rem; margin:16px 0 8px;">Op welke tabbladen moet het geluid afgaan? Zet er zoveel aan als je wilt — het gaat per apparaat alleen af als dát apparaat op dat moment ook echt op zo'n tabblad staat, nergens anders.</p>
+      <div class="menu-form__opties">
+        ${geluidViewsHtml}
+      </div>
     </div>`;
 }
 
@@ -2949,6 +2976,7 @@ root.addEventListener("change", e => {
   if(action === "wagen-glas") wagenGlasWijzigen(id, el.checked);
   if(action === "geluid-upload"){ themaEigenGeluidUploaden(el.files[0]); el.value = ""; }
   if(action === "geluid-duur") themaGeluidDuurWijzigen(el.value);
+  if(action === "thema-geluid-view") themaGeluidViewToggle(el.dataset.view);
 });
 
 // ============================================================
