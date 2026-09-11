@@ -20,9 +20,16 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 ### Meldinggeluid bij nieuwe bestelling
 
 In Instellingen → Achtergrond kan de eigenaar (of teamlid met Instellingen-recht) een eigen
-geluidsbestand uploaden dat afspeelt zodra er een nieuwe bestelling binnenkomt — alleen op
-apparaten van teamleden met het **Keuken**-recht (gasten via de zelfbestel-pagina horen nooit
-iets). Standaard staat dit op **"🔇 Geen geluid"**.
+geluidsbestand uploaden dat afspeelt zodra er een nieuwe bestelling binnenkomt. Standaard staat
+dit op **"🔇 Geen geluid"**.
+
+Daaronder kies je op welke tabbladen (Bestellen, Keuken, Bezorgen, Historie, Voorraad) het geluid
+moet afgaan — meerdere tegelijk aanvinken mag. Het geluid gaat per apparaat alleen af als dát
+apparaat op het moment van de nieuwe bestelling ook echt op een aangevinkt tabblad openstaat;
+staat een apparaat ergens anders (bijv. in Instellingen, of gewoon een ander tabblad dan
+aangevinkt), dan blijft het daar stil. Standaard (voordat dit ooit aangepast is) staat alleen
+Keuken aan. Gasten via de zelfbestel-pagina horen sowieso nooit iets — die pagina heeft geen
+meldinggeluid.
 
 Via **"⬆️ Eigen geluid uploaden"** kies je een geluidsbestand (max 400 KB). Dat bestand wordt
 — net als de rest van het thema — rechtstreeks in de Realtime Database opgeslagen (er is geen
@@ -245,6 +252,7 @@ restaurants/
       geluid: "eigen"         ← optioneel, "geen" (standaard) of "eigen" — zie thema.geluidEigenData hieronder
       geluidEigenData: "data:audio/mpeg;base64,..."  ← alleen aanwezig bij een eigen upload
       geluidEigenNaam: "meldingxyz.mp3"              ← alleen aanwezig bij een eigen upload
+      geluidViews: { keuken: true, bezorgen: true }  ← optioneel, op welke tabbladen het geluid afgaat (meerdere tegelijk mag); niet gezet = alleen Keuken
     plattegrond/
       "2-5": { type: "tafel", nummer: 1, bezet: false }
       "2-6": { type: "stoel", richting: "boven" }   ← richting: boven|rechts|onder|links (rotatie)
