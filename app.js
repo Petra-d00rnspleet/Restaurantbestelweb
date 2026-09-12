@@ -199,6 +199,38 @@ function mijnRestaurantVerwijderenUitLijst(code){
   state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
 }
+// Het "type" (gemaakt/gejoind) wordt lokaal opgeslagen op het moment dat je een restaurant
+// maakt of joint, en verandert daarna nooit meer vanzelf — terwijl eigenaarschap wél kan
+// wisselen (overdragen, mede-eigenaar worden, je eigen eigenaarschap intrekken, of een
+// sitebeheer-overrule), soms zelfs zonder dat dit apparaat daar op dat moment bij was. Zonder
+// deze check blijft een restaurant dan voorgoed in het verkeerde groepje ("Gemaakte
+// restaurants" / "Gejoinde restaurants") op het startscherm staan. Deze functie leest voor elk
+// restaurant in de lijst de ACTUELE eigenaar-status op en corrigeert het type zo nodig.
+function syncMijnRestaurantsEigenaarschap(){
+  const lijst = state.mijnRestaurants;
+  if(!lijst.length) return;
+  Promise.all(lijst.map(r => {
+    if(!r.ledId) return Promise.resolve(null);
+    return db.ref("restaurants/" + r.code + "/leden/" + r.ledId + "/eigenaar").once("value")
+      .then(snap => (snap.exists() ? { code: r.code, eigenaar: snap.val() === true } : null))
+      .catch(() => null);
+  })).then(resultaten => {
+    let gewijzigd = false;
+    resultaten.forEach(res => {
+      if(!res) return;
+      const juisteType = res.eigenaar ? "gemaakt" : "gejoind";
+      const idx = state.mijnRestaurants.findIndex(r => r.code === res.code);
+      if(idx >= 0 && state.mijnRestaurants[idx].type !== juisteType){
+        state.mijnRestaurants[idx] = { ...state.mijnRestaurants[idx], type: juisteType };
+        gewijzigd = true;
+      }
+    });
+    if(gewijzigd){
+      localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+      render();
+    }
+  });
+}
 // ---------- site-brede gebruikersnaam (verplicht vóór de rest van de site) ----------
 // Slaat de ingevulde naam lokaal op en registreert/werkt dit apparaat bij in de site-brede
 // gebruikerslijst (voor Sitebeheer > Gebruikers) — los van welk restaurant je straks kiest.
@@ -412,6 +444,9 @@ function verlaatHuidigRestaurant(){
   state.landingScherm = "start";
   state.winkelwagen = {};
   state.bestelModus = "plattegrond";
+  // Check meteen of "gemaakt"/"gejoind" voor elk restaurant in je lijst nog klopt — een
+  // eigenaarswissel kan ook op een ánder apparaat hebben plaatsgevonden.
+  syncMijnRestaurantsEigenaarschap();
   state.actieveTafelCel = null;
   render();
 }
@@ -643,6 +678,17 @@ function startRestaurant(){
       mijnRestaurantVerwijderenUitLijst(code);
       verlaatHuidigRestaurant();
       return;
+    }
+    // Eigenaarschap kan hier zojuist gewisseld zijn (overdragen, mede-eigenaar worden/stoppen,
+    // sitebeheer-overrule) — hou het "gemaakt"/"gejoind"-groepje op het startscherm meteen
+    // gelijk met de echte eigenaar-status, ook als deze wissel niet door jezelf kwam.
+    if(state.ledId && state.leden[state.ledId]){
+      const juisteType = state.leden[state.ledId].eigenaar ? "gemaakt" : "gejoind";
+      const idx = state.mijnRestaurants.findIndex(r => r.code === code);
+      if(idx >= 0 && state.mijnRestaurants[idx].type !== juisteType){
+        state.mijnRestaurants[idx] = { ...state.mijnRestaurants[idx], type: juisteType };
+        localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+      }
     }
     render();
   });
@@ -3120,4 +3166,8 @@ auth.onAuthStateChanged(gebruiker => {
   if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
   render();
 });
+// Check bij het opstarten meteen of "gemaakt"/"gejoind" voor elk restaurant in je lijst nog
+// klopt met de echte eigenaar-status in de database (kan ook op een ánder apparaat gewisseld
+// zijn sinds de vorige keer dat je deze site opende).
+syncMijnRestaurantsEigenaarschap();
 render();
