@@ -406,7 +406,7 @@ function verlaatHuidigRestaurant(){
   state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
-  bekendeBestellingIds = null;
+  bekendeBestellingStatussen = null;
   toepassenThema(null);
   state.actiefInRestaurant = false;
   state.landingScherm = "start";
@@ -572,26 +572,37 @@ function restaurantJoinen(codeInvoer, eigenNaam){
     }
   });
 }
-// Onthoudt welke bestelling-ids al bekend waren, om te kunnen zien of er een nieuwe is
-// bijgekomen (en dus het meldingsgeluid moet spelen). null = nog niet geïnitialiseerd voor
-// deze sessie/dit restaurant, zodat er nooit geluid afgaat bij het simpelweg binnenkomen.
-let bekendeBestellingIds = null;
+// Onthoudt de laatst bekende status per bestelling-id, om twee soorten meldenswaardige
+// gebeurtenissen te kunnen herkennen: een gloednieuwe bestelling (status "nieuw", nog
+// onbekend id) én een bestaande bestelling die klaar is om te bezorgen (status wordt
+// "klaar"). Zonder dit tweede geval ging het meldinggeluid nooit af op het Bezorgen-tabblad,
+// omdat een bestelling die van "bereiden" naar "klaar" gaat hetzelfde id behoudt (dus geen
+// "nieuw" id is) — dat was de bug. null = nog niet geïnitialiseerd voor deze sessie/dit
+// restaurant, zodat er nooit geluid afgaat bij het simpelweg binnenkomen/laden van bestaande
+// bestellingen.
+let bekendeBestellingStatussen = null;
 function verwerkBestellingenSnapshot(snap){
   const nieuweData = snap.val() || {};
-  if(bekendeBestellingIds !== null){
-    const erIsEenNieuwe = Object.keys(nieuweData).some(id =>
-      !bekendeBestellingIds.has(id) && nieuweData[id].status === "nieuw"
-    );
-    if(erIsEenNieuwe) speelMeldingsGeluidAf();
+  if(bekendeBestellingStatussen !== null){
+    let erIsEenMelding = false;
+    for(const id in nieuweData){
+      const nieuweStatus = nieuweData[id].status;
+      const oudeStatus = bekendeBestellingStatussen[id]; // undefined = dit id bestond nog niet
+      const isNieuweBestelling = oudeStatus === undefined && nieuweStatus === "nieuw";
+      const isKlaarGeworden = oudeStatus !== undefined && oudeStatus !== "klaar" && nieuweStatus === "klaar";
+      if(isNieuweBestelling || isKlaarGeworden){ erIsEenMelding = true; break; }
+    }
+    if(erIsEenMelding) speelMeldingsGeluidAf();
   }
-  bekendeBestellingIds = new Set(Object.keys(nieuweData));
+  bekendeBestellingStatussen = {};
+  for(const id in nieuweData) bekendeBestellingStatussen[id] = nieuweData[id].status;
   state.bestellingen = nieuweData;
   render();
 }
 function startRestaurant(){
   state.foutmelding = "";
   state.actiefInRestaurant = true;
-  bekendeBestellingIds = null;
+  bekendeBestellingStatussen = null;
   const code = state.restaurantCode;
   db.ref("restaurants/" + code + "/naam").on("value", snap => {
     if(snap.exists()){
@@ -1318,7 +1329,7 @@ function beheerRestaurantBezoeken(code){
   state.plattegrond = {};
   state.categorieen = {};
   state.chat = {};
-  bekendeBestellingIds = null;
+  bekendeBestellingStatussen = null;
   db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/bestellingen").on("value", verwerkBestellingenSnapshot);
   db.ref("restaurants/" + code + "/historie").on("value", snap => { state.historie = snap.val() || {}; render(); });
@@ -1358,7 +1369,7 @@ function beheerRestaurantVerlaten(doorRender){
   state.plattegrond = {};
   state.categorieen = {};
   state.chat = {};
-  bekendeBestellingIds = null;
+  bekendeBestellingStatussen = null;
   state.actiefInRestaurant = false;
   state.winkelwagen = {};
   if(doorRender !== false) render();
@@ -2793,8 +2804,8 @@ function renderInstellingenAchtergrond(){
     </div>
 
     <div class="instel-blok">
-      <div class="instel-blok__titel">🔊 Meldinggeluid bij nieuwe bestelling</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Upload hieronder je eigen geluidsbestand, of zet het uit.</p>
+      <div class="instel-blok__titel">🔊 Meldinggeluid</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Speelt af zodra er een nieuwe bestelling binnenkomt, én zodra een bestelling klaar is om te bezorgen. Upload hieronder je eigen geluidsbestand, of zet het uit.</p>
       <div class="geluid-rij">
         ${geluidGeenHtml}
         ${eigenGeluidHtml}
@@ -2811,7 +2822,7 @@ function renderInstellingenAchtergrond(){
             placeholder="heel geluid" value="${huidig.geluidDuur || ""}" data-action="geluid-duur">
           <span>sec (minimaal ${GELUID_MIN_DUUR} sec)</span>
         </div>` : ""}
-      <p style="color:var(--text-dim); font-size:.82rem; margin:16px 0 8px;">Op welke tabbladen moet het geluid afgaan? Zet er zoveel aan als je wilt — het gaat per apparaat alleen af als dát apparaat op dat moment ook echt op zo'n tabblad staat, nergens anders.</p>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:16px 0 8px;">Op welke tabbladen moet het geluid afgaan? Zet er zoveel aan als je wilt — het gaat per apparaat alleen af als dát apparaat op dat moment ook echt op zo'n tabblad staat, nergens anders. Vink bijv. Keuken aan voor nieuwe bestellingen, en Bezorgen voor bestellingen die klaar zijn om te bezorgen.</p>
       <div class="menu-form__opties">
         ${geluidViewsHtml}
       </div>
