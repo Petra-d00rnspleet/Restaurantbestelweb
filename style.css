@@ -1111,6 +1111,43 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .ban-chat--beheer{ margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
 
 /* ============================================================
+   TEAMCHAT (chat tussen alle teamleden binnen één restaurant)
+   ============================================================ */
+.team-chat{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin:0;
+  max-height:420px;
+  overflow-y:auto;
+  padding-right:2px;
+}
+.team-chat__bericht{
+  align-self:flex-start;
+  padding:8px 12px;
+  border-radius:var(--radius);
+  font-size:.85rem;
+  line-height:1.4;
+  max-width:85%;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+}
+.team-chat__bericht--eigen{
+  align-self:flex-end;
+  background:rgba(193,91,63,.15);
+  border:1px solid var(--ember);
+}
+.team-chat__afzender{
+  font-family:var(--mono);
+  font-size:.66rem;
+  color:var(--text-dim);
+  letter-spacing:.03em;
+  margin-bottom:3px;
+  text-transform:uppercase;
+}
+.team-chat__tekst{ color:var(--text); white-space:pre-wrap; word-break:break-word; }
+
+/* ============================================================
    RESTAURANTNAAM WIJZIGEN
    ============================================================ */
 .naam-wijzig-form{ display:flex; gap:10px; max-width:420px; }
