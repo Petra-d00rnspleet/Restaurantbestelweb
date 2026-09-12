@@ -18,19 +18,24 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
   - **Achtergrond**: een kant-en-klare kleurencombinatie kiezen, of je eigen kleuren instellen — inclusief een rij met alle kleuren van de regenboog om snel te kiezen — plus een subtiel achtergrondpatroon (bijv. vlammen, bord & bestek, wijnglas), een lettertype en een **meldinggeluid** voor de hele app. Geldt voor alle apparaten van dit restaurant.
   - **Plattegrond**: een rooster waarop je tafels, stoelen en banken kunt plaatsen om de indeling van je restaurant weer te geven. Elke tafel krijgt automatisch een nummer en verschijnt daarmee klikbaar bij Bestellen. Een stoel kun je draaien: klik 'm nogmaals aan met het Stoel-gereedschap om 'm 90° te roteren (gebruik Wissen om 'm te verwijderen). Een bank kies je liggend of staand en met een zelf in te stellen grootte (2 t/m 6 plekken); klik daarna op het vakje waar de bank moet beginnen.
 
-### Meldinggeluid bij nieuwe bestelling
+### Meldinggeluid
 
 In Instellingen → Achtergrond kan de eigenaar (of teamlid met Instellingen-recht) een eigen
-geluidsbestand uploaden dat afspeelt zodra er een nieuwe bestelling binnenkomt. Standaard staat
-dit op **"🔇 Geen geluid"**.
+geluidsbestand uploaden. Dit geluid speelt af bij twee soorten gebeurtenissen:
+- er komt een **nieuwe bestelling** binnen;
+- een bestelling wordt **klaar om te bezorgen** (status gaat naar "klaar").
+
+Standaard staat dit op **"🔇 Geen geluid"**.
 
 Daaronder kies je op welke tabbladen (Bestellen, Keuken, Bezorgen, Historie, Voorraad) het geluid
 moet afgaan — meerdere tegelijk aanvinken mag. Het geluid gaat per apparaat alleen af als dát
-apparaat op het moment van de nieuwe bestelling ook echt op een aangevinkt tabblad openstaat;
-staat een apparaat ergens anders (bijv. in Instellingen, of gewoon een ander tabblad dan
-aangevinkt), dan blijft het daar stil. Standaard (voordat dit ooit aangepast is) staat alleen
-Keuken aan. Gasten via de zelfbestel-pagina horen sowieso nooit iets — die pagina heeft geen
-meldinggeluid.
+apparaat op het moment van zo'n gebeurtenis ook echt op een aangevinkt tabblad openstaat; staat
+een apparaat ergens anders (bijv. in Instellingen, of gewoon een ander tabblad dan aangevinkt),
+dan blijft het daar stil. Vink bijvoorbeeld **Keuken** aan om een geluid te horen zodra er een
+nieuwe bestelling binnenkomt, en **Bezorgen** om een geluid te horen zodra een bestelling klaar
+staat om gebracht te worden — dat zijn twee losse, onafhankelijke momenten, dus je kunt ze los
+van elkaar aan- of uitzetten. Standaard (voordat dit ooit aangepast is) staat alleen Keuken aan.
+Gasten via de zelfbestel-pagina horen sowieso nooit iets — die pagina heeft geen meldinggeluid.
 
 Via **"⬆️ Eigen geluid uploaden"** kies je een geluidsbestand (max 400 KB). Dat bestand wordt
 — net als de rest van het thema — rechtstreeks in de Realtime Database opgeslagen (er is geen
@@ -262,7 +267,7 @@ restaurants/
       geluid: "eigen"         ← optioneel, "geen" (standaard) of "eigen" — zie thema.geluidEigenData hieronder
       geluidEigenData: "data:audio/mpeg;base64,..."  ← alleen aanwezig bij een eigen upload
       geluidEigenNaam: "meldingxyz.mp3"              ← alleen aanwezig bij een eigen upload
-      geluidViews: { keuken: true, bezorgen: true }  ← optioneel, op welke tabbladen het geluid afgaat (meerdere tegelijk mag); niet gezet = alleen Keuken
+      geluidViews: { keuken: true, bezorgen: true }  ← optioneel, op welke tabbladen het geluid afgaat (meerdere tegelijk mag; keuken hoort van nature bij nieuwe bestellingen, bezorgen bij bestellingen die klaar zijn); niet gezet = alleen Keuken
     plattegrond/
       "2-5": { type: "tafel", nummer: 1, bezet: false }
       "2-6": { type: "stoel", richting: "boven" }   ← richting: boven|rechts|onder|links (rotatie)
