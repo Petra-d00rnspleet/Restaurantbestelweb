@@ -409,9 +409,15 @@ function themaEigenGeluidVerwijderen(){
 // apparaat, en alléén als dit apparaat op dít moment op een tabblad staat dat hierboven is
 // aangevinkt (zie themaGeluidViewToggle). Staat er niets aangevinkt (nog niet ingesteld), dan
 // geldt Keuken als standaard, zoals voorheen.
-function speelMeldingsGeluidAf(){
+// "events" zegt WELKE gebeurtenis(sen) er zijn geweest ({nieuw, klaar}) — Keuken hoort alleen
+// te rinkelen bij een NIEUWE bestelling, Bezorgen alleen bij een bestelling die KLAAR is om te
+// bezorgen, niet door elkaar. De overige tabbladen (Bestellen/Historie/Voorraad) maken dat
+// onderscheid niet en reageren gewoon op beide soorten meldingen.
+function speelMeldingsGeluidAf(events){
   const viewsAan = geluidViewsMetDefaults(state.thema && state.thema.geluidViews);
   if(!viewsAan[state.huidigeView]) return;
+  if(state.huidigeView === "keuken" && !events.nieuw) return;
+  if(state.huidigeView === "bezorgen" && !events.klaar) return;
   const thema = state.thema || {};
   if(thema.geluid === "eigen" && thema.geluidEigenData){
     geluidAfspelen(thema.geluidEigenData, thema.geluidDuur);
@@ -640,15 +646,17 @@ let bekendeBestellingStatussen = null;
 function verwerkBestellingenSnapshot(snap){
   const nieuweData = snap.val() || {};
   if(bekendeBestellingStatussen !== null){
-    let erIsEenMelding = false;
+    let erIsEenNieuweBestelling = false;
+    let erIsEenKlareBestelling = false;
     for(const id in nieuweData){
       const nieuweStatus = nieuweData[id].status;
       const oudeStatus = bekendeBestellingStatussen[id]; // undefined = dit id bestond nog niet
-      const isNieuweBestelling = oudeStatus === undefined && nieuweStatus === "nieuw";
-      const isKlaarGeworden = oudeStatus !== undefined && oudeStatus !== "klaar" && nieuweStatus === "klaar";
-      if(isNieuweBestelling || isKlaarGeworden){ erIsEenMelding = true; break; }
+      if(oudeStatus === undefined && nieuweStatus === "nieuw") erIsEenNieuweBestelling = true;
+      if(oudeStatus !== undefined && oudeStatus !== "klaar" && nieuweStatus === "klaar") erIsEenKlareBestelling = true;
     }
-    if(erIsEenMelding) speelMeldingsGeluidAf();
+    if(erIsEenNieuweBestelling || erIsEenKlareBestelling){
+      speelMeldingsGeluidAf({ nieuw: erIsEenNieuweBestelling, klaar: erIsEenKlareBestelling });
+    }
   }
   bekendeBestellingStatussen = {};
   for(const id in nieuweData) bekendeBestellingStatussen[id] = nieuweData[id].status;
