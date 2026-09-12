@@ -192,44 +192,52 @@ function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam, type){
   if(index >= 0) state.mijnRestaurants[index] = entry;
   else state.mijnRestaurants.push(entry);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+  // Meteen (opnieuw) een live listener op de eigenaar-status koppelen — nodig voor nieuw
+  // toegevoegde restaurants, en onschadelijk voor bestaande (die worden overgeslagen, zie
+  // hieronder).
+  mijnRestaurantsEigenaarSyncStarten();
 }
 // Haalt een restaurant uit de lijst "mijn restaurants" (dit apparaat) — gebeurt automatisch
 // (verwijderd door eigenaar of sitebeheer) én meteen zodra je zelf wisselt, verwijdert of verlaat.
 function mijnRestaurantVerwijderenUitLijst(code){
   state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+  mijnRestaurantsEigenaarSyncStoppen(code);
 }
 // Het "type" (gemaakt/gejoind) wordt lokaal opgeslagen op het moment dat je een restaurant
 // maakt of joint, en verandert daarna nooit meer vanzelf — terwijl eigenaarschap wél kan
 // wisselen (overdragen, mede-eigenaar worden, je eigen eigenaarschap intrekken, of een
-// sitebeheer-overrule), soms zelfs zonder dat dit apparaat daar op dat moment bij was. Zonder
-// deze check blijft een restaurant dan voorgoed in het verkeerde groepje ("Gemaakte
-// restaurants" / "Gejoinde restaurants") op het startscherm staan. Deze functie leest voor elk
-// restaurant in de lijst de ACTUELE eigenaar-status op en corrigeert het type zo nodig.
-function syncMijnRestaurantsEigenaarschap(){
-  const lijst = state.mijnRestaurants;
-  if(!lijst.length) return;
-  Promise.all(lijst.map(r => {
-    if(!r.ledId) return Promise.resolve(null);
-    return db.ref("restaurants/" + r.code + "/leden/" + r.ledId + "/eigenaar").once("value")
-      .then(snap => (snap.exists() ? { code: r.code, eigenaar: snap.val() === true } : null))
-      .catch(() => null);
-  })).then(resultaten => {
-    let gewijzigd = false;
-    resultaten.forEach(res => {
-      if(!res) return;
-      const juisteType = res.eigenaar ? "gemaakt" : "gejoind";
-      const idx = state.mijnRestaurants.findIndex(r => r.code === res.code);
-      if(idx >= 0 && state.mijnRestaurants[idx].type !== juisteType){
+// sitebeheer-overrule) door IEMAND ANDERS, op een ANDER apparaat, terwijl jij al gewoon op het
+// startscherm zit. Een simpele eenmalige controle (bijv. alleen bij het opstarten van de pagina)
+// is dan niet genoeg: als je de pagina niet ververst, zie je de wissel nooit. Daarom houden we
+// hier voor elk restaurant in de lijst een PERMANENTE live-listener aan op de eigenaar-status
+// van je eigen lidmaatschap — die corrigeert het groepje ("Gemaakte" / "Gejoinde restaurants")
+// altijd meteen, ongeacht welk scherm je op dat moment open hebt staan of wie de wissel deed.
+const mijnRestaurantsEigenaarListeners = {}; // code -> firebase ref met actieve listener
+function mijnRestaurantsEigenaarSyncStarten(){
+  state.mijnRestaurants.forEach(r => {
+    if(!r.ledId || mijnRestaurantsEigenaarListeners[r.code]) return; // al een listener actief
+    const ref = db.ref("restaurants/" + r.code + "/leden/" + r.ledId + "/eigenaar");
+    mijnRestaurantsEigenaarListeners[r.code] = ref;
+    ref.on("value", snap => {
+      const idx = state.mijnRestaurants.findIndex(x => x.code === r.code);
+      if(idx < 0) return; // ondertussen al uit de lijst verwijderd (verwijderd/verlaten)
+      const juisteType = snap.val() === true ? "gemaakt" : "gejoind";
+      if(state.mijnRestaurants[idx].type !== juisteType){
         state.mijnRestaurants[idx] = { ...state.mijnRestaurants[idx], type: juisteType };
-        gewijzigd = true;
+        localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+        render();
       }
     });
-    if(gewijzigd){
-      localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-      render();
-    }
   });
+}
+// Ontkoppelt de listener voor één restaurant (bijv. omdat het net uit "mijn restaurants" is
+// verwijderd), zodat er geen listeners blijven hangen op restaurants die je niet meer volgt.
+function mijnRestaurantsEigenaarSyncStoppen(code){
+  if(mijnRestaurantsEigenaarListeners[code]){
+    mijnRestaurantsEigenaarListeners[code].off();
+    delete mijnRestaurantsEigenaarListeners[code];
+  }
 }
 // ---------- site-brede gebruikersnaam (verplicht vóór de rest van de site) ----------
 // Slaat de ingevulde naam lokaal op en registreert/werkt dit apparaat bij in de site-brede
@@ -444,9 +452,10 @@ function verlaatHuidigRestaurant(){
   state.landingScherm = "start";
   state.winkelwagen = {};
   state.bestelModus = "plattegrond";
-  // Check meteen of "gemaakt"/"gejoind" voor elk restaurant in je lijst nog klopt — een
-  // eigenaarswissel kan ook op een ánder apparaat hebben plaatsgevonden.
-  syncMijnRestaurantsEigenaarschap();
+  // Zorgt dat de live eigenaar-listeners (zie mijnRestaurantsEigenaarSyncStarten) actief zijn
+  // voor alle restaurants in je lijst — normaal gesproken lopen deze al vanaf het opstarten,
+  // dit is puur een extra vangnet.
+  mijnRestaurantsEigenaarSyncStarten();
   state.actieveTafelCel = null;
   render();
 }
@@ -679,17 +688,9 @@ function startRestaurant(){
       verlaatHuidigRestaurant();
       return;
     }
-    // Eigenaarschap kan hier zojuist gewisseld zijn (overdragen, mede-eigenaar worden/stoppen,
-    // sitebeheer-overrule) — hou het "gemaakt"/"gejoind"-groepje op het startscherm meteen
-    // gelijk met de echte eigenaar-status, ook als deze wissel niet door jezelf kwam.
-    if(state.ledId && state.leden[state.ledId]){
-      const juisteType = state.leden[state.ledId].eigenaar ? "gemaakt" : "gejoind";
-      const idx = state.mijnRestaurants.findIndex(r => r.code === code);
-      if(idx >= 0 && state.mijnRestaurants[idx].type !== juisteType){
-        state.mijnRestaurants[idx] = { ...state.mijnRestaurants[idx], type: juisteType };
-        localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-      }
-    }
+    // Eigenaar-wissels ("gemaakt" vs "gejoind" op het startscherm) worden los bijgehouden door
+    // de permanente listener uit mijnRestaurantsEigenaarSyncStarten() — die loopt sowieso al,
+    // ook los van of je dit specifieke restaurant nu open hebt staan.
     render();
   });
   db.ref("restaurants/" + code + "/thema").on("value", snap => {
@@ -3166,8 +3167,9 @@ auth.onAuthStateChanged(gebruiker => {
   if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
   render();
 });
-// Check bij het opstarten meteen of "gemaakt"/"gejoind" voor elk restaurant in je lijst nog
-// klopt met de echte eigenaar-status in de database (kan ook op een ánder apparaat gewisseld
-// zijn sinds de vorige keer dat je deze site opende).
-syncMijnRestaurantsEigenaarschap();
+// Koppelt bij het opstarten meteen live listeners op de eigenaar-status van elk restaurant in
+// je lijst, zodat "Gemaakte"/"Gejoinde restaurants" op het startscherm altijd blijft kloppen —
+// ook als de eigenaar-wissel gebeurt terwijl jij al op dit scherm zit (zie
+// mijnRestaurantsEigenaarSyncStarten hierboven voor de volledige uitleg).
+mijnRestaurantsEigenaarSyncStarten();
 render();
