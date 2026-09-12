@@ -10,6 +10,7 @@ live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 - **Bezorgen**: bestellingen die klaar zijn verschijnen hier. Klik op **Bezorgd** om af te ronden — de bestelling verhuist dan naar Historie.
 - **Historie**: alle bezorgde bestellingen per restaurant, plus een tabel met hoeveel er per categorie besteld is. Individuele bestellingen of de hele historie zijn te verwijderen.
 - **Voorraad**: een eigen tabblad naast Historie, waar je elk product op **uitverkocht** kunt zetten zonder het te verwijderen — het verschijnt dan grijs en niet-klikbaar bij Bestellen.
+- **Chat**: een eigen tabblad **"Chat 💬"**, altijd zichtbaar voor élk teamlid — los van de rechten hierboven. Iedereen kan hier onbeperkt met het hele team chatten (live, net als de rest van de app), totdat de eigenaar/eigenaars de chatfunctie voor een specifiek teamlid uitzetten bij Instellingen → Algemeen → Team & rechten (zie hieronder). Is de chatfunctie voor je uitgezet, dan kun je het gesprek nog wel gewoon lezen — alleen zelf een bericht versturen lukt dan niet meer.
 - **Systeemupdates op het startscherm**: nieuwe updates (geplaatst via Sitebeheer) verschijnen als teaser op het startscherm, met per update een knop **"Gelezen ✕"**. Klik je die aan, dan verdwijnt die update voor jou van het startscherm (dit wordt lokaal per apparaat onthouden) — in Sitebeheer zelf blijft de update gewoon volledig zichtbaar, voor iedereen.
 - **Instellingen**: onderverdeeld in vier tabbladen:
   - **Algemeen**: restaurantnaam wijzigen, restaurantcode bekijken/delen, team & rechten (eigenaar), een QR-code voor zelfbestellen printen, restaurant verlaten.
@@ -67,12 +68,18 @@ Iedereen die daarna via de code **joint**, verschijnt in Instellingen onder **Te
 — zichtbaar voor de eigenaar. Daar kan de eigenaar per teamlid:
 
 - een **functie** invullen (bijv. "Ober", "Kok", "Manager");
-- **rechten** aan- of uitvinken voor Bestellen, Keuken, Bezorgen, Historie en Instellingen.
+- **rechten** aan- of uitvinken voor Bestellen, Keuken, Bezorgen, Historie en Instellingen;
+- de vinkbox **"💬 Mag chatten"** uitzetten om de chatfunctie (zie hierboven) voor dat ene
+  teamlid te blokkeren — of weer aanvinken om 'm terug te zetten. Dit staat los van de rechten
+  hierboven: standaard mag iedereen chatten, dus deze vinkbox begint aangevinkt.
 
 De tabbladen die iemand te zien krijgt, worden bepaald door die rechten — iemand zonder
-"Keuken"-recht ziet dat tabblad simpelweg niet. Instellingen (code bekijken, restaurant
+"Keuken"-recht ziet dat tabblad simpelweg niet. Chat is hierop de uitzondering: dat tabblad
+blijft voor ieder teamlid zichtbaar, wat er ook aan rechten is ingesteld — alleen het vermogen
+om er zelf in te schrijven is aan/uit te zetten. Instellingen (code bekijken, restaurant
 verlaten) blijft voor iedereen zichtbaar; menu beheren en team beheren vereisen het
-"Instellingen"-recht (of eigenaarschap).
+"Instellingen"-recht (of eigenaarschap). Eigenaren zelf kunnen niet voor de chat geblokkeerd
+worden — net als bij de rechten hierboven hebben zij altijd volledige toegang.
 
 ### Sitebeheer (alleen voor jou, als eigenaar van de website)
 
@@ -242,8 +249,11 @@ restaurants/
         naam: "Sara",
         functie: "Ober",
         eigenaar: false,
-        rechten: { bestellen: true, keuken: false, bezorgen: false, historie: false, instellingen: false }
+        rechten: { bestellen: true, keuken: false, bezorgen: false, historie: false, instellingen: false },
+        chatGeblokkeerd: true   ← optioneel; alleen aanwezig als de eigenaar de chat voor dit teamlid heeft uitgezet (anders mag diegene gewoon chatten)
       }
+    chat/
+      -Nber.../ { ledId: "-Nlid...", naam: "Sara", tekst: "Tafel 4 wacht nog op bestek", tijdstip: <timestamp> }
     thema/
       achtergrond: "#150f0b"
       tekst: "#f3ead9"
