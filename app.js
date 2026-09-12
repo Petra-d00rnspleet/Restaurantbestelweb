@@ -70,6 +70,7 @@ const state = {
   categorieen: {},             // categorieën van het huidige restaurant
   leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
   ledenGeladen: false,
+  chat: {},                    // teamchat van het huidige restaurant: { berichtId: {ledId, naam, tekst, tijdstip} }
   waarschuwing: null,          // { tekst, tijdstip } — actieve waarschuwing van sitebeheer aan dit restaurant, of null
   thema: null,                 // { achtergrond, tekst } — eigen kleuren voor dit restaurant
   plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
@@ -386,6 +387,7 @@ function verlaatHuidigRestaurant(){
     db.ref("restaurants/" + code + "/waarschuwing").off();
     db.ref("restaurants/" + code + "/plattegrond").off();
     db.ref("restaurants/" + code + "/categorieen").off();
+    db.ref("restaurants/" + code + "/chat").off();
   }
   state.restaurantCode = null;
   state.restaurantNaam = null;
@@ -394,6 +396,7 @@ function verlaatHuidigRestaurant(){
   state.gebruikersNaam = null;
   state.leden = {};
   state.ledenGeladen = false;
+  state.chat = {};
   state.thema = null;
   state.waarschuwing = null;
   state.plattegrond = {};
@@ -645,6 +648,11 @@ function startRestaurant(){
     state.categorieen = snap.val() || {};
     render();
   });
+  // Teamchat: iedereen in dit restaurant leest live mee, ongeacht rechten.
+  db.ref("restaurants/" + code + "/chat").on("value", snap => {
+    state.chat = snap.val() || {};
+    render();
+  });
   render();
 }
 
@@ -794,6 +802,30 @@ function updateGelezenMarkeren(id){
   render();
 }
 
+// ---------- teamchat (alle teamleden van dit restaurant, los van de losse rechten) ----------
+// Iedereen in het team mag hier onbeperkt in chatten, totdat de eigenaar de chatfunctie voor
+// dat specifieke teamlid uitzet (zie ledChatToggle hierboven, in te stellen bij Team & rechten).
+// Wie geblokkeerd is, kan de chat nog wel gewoon lezen — alleen versturen lukt dan niet meer.
+function chatBerichtVersturen(tekst){
+  tekst = (tekst || "").trim();
+  if(!tekst) return;
+  const eigenLid = state.leden[state.ledId];
+  if(eigenLid && eigenLid.chatGeblokkeerd){
+    toonToast("De eigenaar heeft de chatfunctie voor jou uitgezet.");
+    return;
+  }
+  db.ref("restaurants/" + state.restaurantCode + "/chat").push({
+    ledId: state.ledId,
+    naam: (eigenLid && eigenLid.naam) || state.gebruikersNaam || "Onbekend",
+    tekst: tekst,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => {
+    const veld = document.getElementById("chat-tekst");
+    if(veld) veld.value = "";
+    render();
+  });
+}
+
 // ---------- team & rechten (alleen te beheren door de eigenaar van het restaurant) ----------
 function ledFunctieWijzigen(ledId, functie){
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/functie").set(functie.trim());
@@ -804,6 +836,16 @@ function ledRechtToggle(ledId, recht, waarde){
 function ledVerwijderen(ledId){
   if(!confirm("Dit teamlid verwijderen? Diegene moet opnieuw joinen om weer toegang te krijgen.")) return;
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
+}
+// De eigenaar zet de chatfunctie van een (niet-eigenaar) teamlid aan of uit. Standaard mag
+// iedereen onbeperkt chatten (chatGeblokkeerd staat dan niet in de data); pas als de eigenaar
+// het uitzet, kan dat teamlid de teamchat alleen nog lezen, niet meer schrijven.
+function ledChatToggle(ledId, magChatten){
+  if(magChatten){
+    db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/chatGeblokkeerd").remove();
+  } else {
+    db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/chatGeblokkeerd").set(true);
+  }
 }
 // Eigenaar draagt het eigenaarschap over aan een ander (bestaand) teamlid. Jijzelf wordt
 // meteen gewoon teamlid terug (met alle rechten, zodat je zelf niets kwijtraakt), de gekozen
@@ -1271,6 +1313,7 @@ function beheerRestaurantBezoeken(code){
   state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
+  state.chat = {};
   bekendeBestellingIds = null;
   db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/bestellingen").on("value", verwerkBestellingenSnapshot);
@@ -1280,6 +1323,7 @@ function beheerRestaurantBezoeken(code){
   db.ref("restaurants/" + code + "/waarschuwing").on("value", snap => { state.waarschuwing = snap.val() || null; render(); });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => { state.plattegrond = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/categorieen").on("value", snap => { state.categorieen = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/chat").on("value", snap => { state.chat = snap.val() || {}; render(); });
   render();
 }
 // Sluit het bezoek aan een restaurant af en gaat terug naar het beheerpaneel (tenzij
@@ -1295,6 +1339,7 @@ function beheerRestaurantVerlaten(doorRender){
     db.ref("restaurants/" + code + "/waarschuwing").off();
     db.ref("restaurants/" + code + "/plattegrond").off();
     db.ref("restaurants/" + code + "/categorieen").off();
+    db.ref("restaurants/" + code + "/chat").off();
   }
   toepassenThema(null);
   state.beheerBezoekModus = false;
@@ -1308,6 +1353,7 @@ function beheerRestaurantVerlaten(doorRender){
   state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
+  state.chat = {};
   bekendeBestellingIds = null;
   state.actiefInRestaurant = false;
   state.winkelwagen = {};
@@ -2008,6 +2054,9 @@ function renderDashboard(){
     { key:"historie", label:"Historie 🕓" },
   ].filter(t => heeftRecht(t.key));
   if(heeftRecht('instellingen')) tabsConfig.push({ key:"voorraad", label:"Voorraad 📦" });
+  // Chat is altijd zichtbaar voor elk teamlid — dit tabblad is bewust niet aan een recht
+  // gekoppeld, alleen aan de losse chatGeblokkeerd-vlag die de eigenaar per teamlid kan zetten.
+  tabsConfig.push({ key:"chat", label:"Chat 💬" });
   tabsConfig.push({ key:"instellingen", label:"Instellingen ⚙️" });
 
   if(!tabsConfig.some(t => t.key === state.huidigeView)){
@@ -2047,6 +2096,7 @@ function renderDashboard(){
   else if(state.huidigeView === "bezorgen") inhoud.innerHTML = renderBezorgen();
   else if(state.huidigeView === "historie") inhoud.innerHTML = renderHistorie();
   else if(state.huidigeView === "voorraad") inhoud.innerHTML = renderVoorraad();
+  else if(state.huidigeView === "chat") inhoud.innerHTML = renderChat();
   else if(state.huidigeView === "instellingen") inhoud.innerHTML = renderInstellingen();
 }
 
@@ -2399,7 +2449,7 @@ function renderInstellingenAlgemeen(){
               <div class="team-rij">
                 <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
                 ${lid.functie ? `<div style="color:var(--text-dim); font-size:.82rem;">${lid.functie}</div>` : ""}
-                <div style="color:var(--text-dim); font-size:.78rem;">${rechtenTekst}</div>
+                <div style="color:var(--text-dim); font-size:.78rem;">${rechtenTekst}${lid.chatGeblokkeerd ? " · Chat geblokkeerd" : ""}</div>
               </div>`;
           }
           // Eigenaar-weergave: bewerkbaar, ook voor rijen van (andere) eigenaren.
@@ -2419,6 +2469,10 @@ function renderInstellingenAlgemeen(){
                       <input type="checkbox" data-action="recht-toggle" data-id="${id}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
                       ${r.label}
                     </label>`).join("")}
+                  <label class="team-recht" title="Standaard mag iedereen onbeperkt chatten — vink uit om alleen lezen toe te staan.">
+                    <input type="checkbox" data-action="chat-recht-toggle" data-id="${id}" ${lid.chatGeblokkeerd ? "" : "checked"}>
+                    💬 Mag chatten
+                  </label>
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
                   <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${id}" title="${lid.naam} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
@@ -2589,6 +2643,32 @@ function renderVoorraad(){
     <div class="instel-blok">
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Zet een product op uitverkocht om het tijdelijk te verbergen bij Bestellen, zonder het te verwijderen.</p>
       <ul class="voorraad-lijst">${lijstHtml}</ul>
+    </div>`;
+}
+
+// Teamchat: zichtbaar voor élk teamlid van dit restaurant, ongeacht rechten. Iedereen mag
+// hier onbeperkt in schrijven totdat de eigenaar de chatfunctie voor dat teamlid uitzet
+// (Instellingen > Algemeen > Team & rechten) — lezen kan dan nog wel gewoon.
+function renderChat(){
+  const eigenLid = state.leden[state.ledId];
+  const magChatten = !(eigenLid && eigenLid.chatGeblokkeerd);
+  const berichtenArr = Object.entries(state.chat || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
+  const berichtenHtml = berichtenArr.length ? `
+    <div class="team-chat">
+      ${berichtenArr.map(([id,b]) => `
+        <div class="team-chat__bericht ${b.ledId===state.ledId ? 'team-chat__bericht--eigen' : ''}">
+          <div class="team-chat__afzender">${b.naam || "Onbekend"}</div>
+          <div class="team-chat__tekst">${b.tekst}</div>
+        </div>`).join("")}
+    </div>` : `<div class="leeg">Nog geen berichten — begin het gesprek met je team!</div>`;
+
+  return `
+    <h2 class="view-titel">Chat 💬</h2>
+    <div class="instel-blok">
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Chat live met iedereen in dit restaurant.${magChatten ? "" : " De eigenaar heeft de chatfunctie voor jou uitgezet — je kunt hier nog wel meelezen."}</p>
+      ${berichtenHtml}
+      <textarea id="chat-tekst" rows="2" placeholder="${magChatten ? "Typ een bericht…" : "Je kunt momenteel niet chatten"}" ${magChatten?"":"disabled"} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:14px;"></textarea>
+      <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="chat-versturen" ${magChatten?"":"disabled"}>Versturen</button>
     </div>`;
 }
 
@@ -2810,6 +2890,8 @@ root.addEventListener("click", e => {
     case "historie-verwijder": historieVerwijderen(id); break;
     case "historie-wissen": historieWissen(); break;
 
+    case "chat-versturen": chatBerichtVersturen(document.getElementById("chat-tekst").value); break;
+
     case "beheer-open": beheerPaneelOpenen(); break;
     case "qr-printen": qrPrinten(); break;
     case "qr-link-kopieren": qrLinkKopieren(); break;
@@ -2967,6 +3049,7 @@ root.addEventListener("change", e => {
   const action = el.dataset.action;
   const id = el.dataset.id;
   if(action === "recht-toggle") ledRechtToggle(id, el.dataset.recht, el.checked);
+  if(action === "chat-recht-toggle") ledChatToggle(id, el.checked);
   if(action === "functie-wijzigen") ledFunctieWijzigen(id, el.value);
   if(action === "thema-achtergrond") themaWijzigen("achtergrond", el.value);
   if(action === "thema-tekst") themaWijzigen("tekst", el.value);
