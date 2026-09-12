@@ -358,8 +358,20 @@ function themaGeluidKiezen(key){
 // Per tabblad (Bestellen/Keuken/Bezorgen/Historie/Voorraad) aan of uit — meerdere tegelijk aan
 // mag. Wordt per apparaat/tabblad losstaand gecheckt in speelMeldingsGeluidAf hieronder: het
 // geluid gaat alleen af op het apparaat dat op dát moment op zo'n aangevinkt tabblad staat.
+// Bouwt ALTIJD een compleet object met alle tabbladen erin (aangevuld met de standaardwaarden
+// hieronder voor wat nog nooit expliciet is opgeslagen) — anders zou het aanvinken van bijv.
+// "Bezorgen" in de database een object aanmaken dat ALLEEN "bezorgen" bevat, waardoor "Keuken"
+// (dat impliciet aanstond via de standaardwaarde) stilletjes uit zou gaan. Dat was de bug.
+function geluidViewsMetDefaults(opgeslagen){
+  const resultaat = {};
+  MELDING_VIEWS_DEFINITIES.forEach(v => {
+    const standaard = v.key === "keuken"; // standaard staat alleen Keuken aan
+    resultaat[v.key] = (opgeslagen && opgeslagen[v.key] !== undefined) ? !!opgeslagen[v.key] : standaard;
+  });
+  return resultaat;
+}
 function themaGeluidViewToggle(viewKey){
-  const huidigeViews = (state.thema && state.thema.geluidViews) || { keuken: true };
+  const huidigeViews = geluidViewsMetDefaults(state.thema && state.thema.geluidViews);
   db.ref("restaurants/" + state.restaurantCode + "/thema/geluidViews/" + viewKey).set(!huidigeViews[viewKey]);
 }
 // Leest een door de gebruiker gekozen bestand in en slaat 'm als data-URI op in het thema
@@ -398,7 +410,7 @@ function themaEigenGeluidVerwijderen(){
 // aangevinkt (zie themaGeluidViewToggle). Staat er niets aangevinkt (nog niet ingesteld), dan
 // geldt Keuken als standaard, zoals voorheen.
 function speelMeldingsGeluidAf(){
-  const viewsAan = (state.thema && state.thema.geluidViews) || { keuken: true };
+  const viewsAan = geluidViewsMetDefaults(state.thema && state.thema.geluidViews);
   if(!viewsAan[state.huidigeView]) return;
   const thema = state.thema || {};
   if(thema.geluid === "eigen" && thema.geluidEigenData){
@@ -2799,7 +2811,7 @@ function renderInstellingenAchtergrond(){
       <button type="button" class="geluid-optie__preview" data-action="geluid-eigen-preview" title="Beluister">▶</button>
       <button type="button" class="geluid-optie__verwijder" data-action="geluid-eigen-verwijderen" title="Verwijderen">🗑️</button>
     </div>` : "";
-  const geluidViewsHuidig = huidig.geluidViews || { keuken: true };
+  const geluidViewsHuidig = geluidViewsMetDefaults(huidig.geluidViews);
   const geluidViewsHtml = MELDING_VIEWS_DEFINITIES.map(v => `
     <label class="menu-form__optie">
       <input type="checkbox" data-action="thema-geluid-view" data-view="${v.key}" ${geluidViewsHuidig[v.key] ? "checked" : ""}>
