@@ -59,7 +59,7 @@ const state = {
   naamLimiet: null,            // eigen letterlimiet voor de restaurantnaam, indien sitebeheer die heeft ingesteld (anders MAX_LETTERS_RESTAURANTNAAM)
   ledId: null,                 // jouw teamlid-id binnen dit restaurant
   gebruikersNaam: null,        // jouw eigen naam
-  mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam}] — max 2 per apparaat
+  mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam, type:"gemaakt"|"gejoind"}] — max 2 gemaakt, onbeperkt gejoind
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken | joinen | feedback
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
@@ -106,7 +106,7 @@ const state = {
 };
 
 const MERKNAAM = "Restaurants";
-const MAX_RESTAURANTS_PER_PERSOON = 2;
+const MAX_RESTAURANTS_GEMAAKT = 2; // alleen het aantal dat je zelf máákt is beperkt — joinen mag onbeperkt
 const MAX_PRODUCTEN_PER_BESTELLING = 20; // max. totaal aantal producten (som van aantallen) in één bestelling
 const MAX_LETTERS_PRODUCTNAAM = 20;      // max. aantal tekens voor een productnaam
 const MAX_LETTERS_SITE_NAAM = 20;        // max. aantal tekens voor de site-brede gebruikersnaam
@@ -181,9 +181,14 @@ const GELUID_MAX_BYTES = 400 * 1024; // eigen upload — grotere bestanden worde
 
 // ---------- helpers ----------
 // Slaat (of werkt bij) een restaurant op in de lijst "mijn restaurants" van dit apparaat.
-function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam){
+// "type" ("gemaakt" of "gejoind") bepaalt in welk groepje het straks op het startscherm
+// verschijnt — laat je 'm weg (bijv. bij het bijwerken van alleen de naam), dan blijft het
+// bestaande type gewoon staan. Voor oudere, al opgeslagen restaurants (van vóór dit onderscheid
+// bestond) is er geen echt type bekend; die vallen dan terug op "gemaakt".
+function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam, type){
   const index = state.mijnRestaurants.findIndex(r => r.code === code);
-  const entry = { code, naam, ledId, gebruikersNaam };
+  const bestaandType = index >= 0 ? state.mijnRestaurants[index].type : undefined;
+  const entry = { code, naam, ledId, gebruikersNaam, type: type || bestaandType || "gemaakt" };
   if(index >= 0) state.mijnRestaurants[index] = entry;
   else state.mijnRestaurants.push(entry);
   localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
@@ -489,8 +494,9 @@ function zelfBestelQrAfbeeldingUrl(code){
 function restaurantMaken(naam, eigenNaam){
   naam = naam.trim();
   eigenNaam = (eigenNaam || "").trim();
-  if(state.mijnRestaurants.length >= MAX_RESTAURANTS_PER_PERSOON){
-    state.foutmelding = `Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum.`;
+  const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
+  if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
+    state.foutmelding = `Je hebt al ${MAX_RESTAURANTS_GEMAAKT} restaurants gemaakt op dit apparaat — dat is het maximum om zelf te maken. Joinen bij een restaurant met een code kan wel nog onbeperkt.`;
     render(); return;
   }
   if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
@@ -518,7 +524,7 @@ function restaurantMaken(naam, eigenNaam){
       catRef.set({ naam: "Overig", aangemaakt: firebase.database.ServerValue.TIMESTAMP }),
     ]).then(() => ledRef.key);
   }).then(ledId => {
-    mijnRestaurantOpslaan(code, naam, ledId, eigenNaam);
+    mijnRestaurantOpslaan(code, naam, ledId, eigenNaam, "gemaakt");
     state.restaurantCode = code;
     state.restaurantNaam = naam;
     state.ledId = ledId;
@@ -541,10 +547,8 @@ function restaurantJoinen(codeInvoer, eigenNaam){
     startRestaurant();
     return;
   }
-  if(state.mijnRestaurants.length >= MAX_RESTAURANTS_PER_PERSOON){
-    state.foutmelding = `Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum.`;
-    render(); return;
-  }
+  // Geen limiet op het aantal restaurants waar je bij kunt joinen — alleen het aantal dat je
+  // zelf máákt is beperkt (zie restaurantMaken hierboven).
   db.ref("restaurants/" + code).once("value").then(snap => {
     if(!snap.exists()){
       state.foutmelding = "Geen restaurant gevonden met code " + code + ".";
@@ -558,7 +562,7 @@ function restaurantJoinen(codeInvoer, eigenNaam){
         rechten: { ...STANDAARD_RECHTEN },
         aangemaakt: firebase.database.ServerValue.TIMESTAMP,
       }).then(() => {
-        mijnRestaurantOpslaan(code, snap.val().naam, ledRef.key, eigenNaam);
+        mijnRestaurantOpslaan(code, snap.val().naam, ledRef.key, eigenNaam, "gejoind");
         state.restaurantCode = code;
         state.restaurantNaam = snap.val().naam;
         state.ledId = ledRef.key;
@@ -1714,28 +1718,44 @@ function renderLanding(){
           </div>`).join("")}
       </div>` : "";
 
+    const gemaaktArr = state.mijnRestaurants.filter(r => r.type !== "gejoind");
+    const gejoindArr = state.mijnRestaurants.filter(r => r.type === "gejoind");
+    const restaurantKaart = r => `
+      <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" data-code="${r.code}" style="width:320px;">
+        <div class="choice-card__title">Verder naar ${r.naam}</div>
+        <p class="choice-card__desc">Code ${r.code} — ga er direct naartoe.</p>
+      </button>`;
     const restaurantsHtml = state.mijnRestaurants.length ? `
-      <div class="landing__mijn-restaurants">
-        ${state.mijnRestaurants.map(r => `
-          <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" data-code="${r.code}" style="width:320px;">
-            <div class="choice-card__title">Verder naar ${r.naam}</div>
-            <p class="choice-card__desc">Code ${r.code} — ga er direct naartoe.</p>
-          </button>`).join("")}
-      </div>` : "";
+      ${gemaaktArr.length ? `
+        <div class="landing__restaurant-groep">
+          <div class="landing__restaurant-groep__titel">Gemaakte restaurants</div>
+          <div class="landing__mijn-restaurants">
+            ${gemaaktArr.map(restaurantKaart).join("")}
+          </div>
+        </div>` : ""}
+      ${gejoindArr.length ? `
+        <div class="landing__restaurant-groep">
+          <div class="landing__restaurant-groep__titel">Gejoinde restaurants</div>
+          <div class="landing__mijn-restaurants">
+            ${gejoindArr.map(restaurantKaart).join("")}
+          </div>
+        </div>` : ""}
+    ` : "";
 
-    const kanNogMeer = state.mijnRestaurants.length < MAX_RESTAURANTS_PER_PERSOON;
-    const keuzesHtml = kanNogMeer ? `
+    const kanNogMaken = gemaaktArr.length < MAX_RESTAURANTS_GEMAAKT;
+    const keuzesHtml = `
       <div class="landing__choices">
+        ${kanNogMaken ? `
         <button class="choice-card" data-action="ga-maken">
           <div class="choice-card__title">Restaurant maken</div>
           <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
-        </button>
+        </button>` : ""}
         <button class="choice-card" data-action="ga-joinen">
           <div class="choice-card__title">Restaurant joinen</div>
-          <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant.</p>
+          <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant — dit mag onbeperkt vaak.</p>
         </button>
-      </div>` : `
-      <p class="landing__limiet">Je hebt al ${MAX_RESTAURANTS_PER_PERSOON} restaurants op dit apparaat — dat is het maximum. Vraag een eigenaar om je als teamlid te verwijderen, of vraag sitebeheer om een restaurant te verwijderen, om weer plek te maken.</p>`;
+      </div>
+      ${kanNogMaken ? "" : `<p class="landing__limiet">Je hebt al ${MAX_RESTAURANTS_GEMAAKT} restaurants gemaakt op dit apparaat — dat is het maximum om zelf te maken. Vraag een eigenaar om je als teamlid te verwijderen, of vraag sitebeheer om een restaurant te verwijderen, om weer plek te maken. Joinen bij een restaurant met een code blijft wel gewoon onbeperkt mogelijk.</p>`}`;
 
     root.innerHTML = `
       <div class="landing">
