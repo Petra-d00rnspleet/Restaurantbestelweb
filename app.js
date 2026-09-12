@@ -540,7 +540,7 @@ function restaurantMaken(naam, eigenNaam){
   eigenNaam = (eigenNaam || "").trim();
   const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
   if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
-    state.foutmelding = `Je hebt al ${MAX_RESTAURANTS_GEMAAKT} restaurants gemaakt op dit apparaat — dat is het maximum om zelf te maken. Joinen bij een restaurant met een code kan wel nog onbeperkt.`;
+    state.foutmelding = `Je hebt het maximum van ${MAX_RESTAURANTS_GEMAAKT} gemaakte restaurants al bereikt.`;
     render(); return;
   }
   if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
@@ -1803,17 +1803,15 @@ function renderLanding(){
     const kanNogMaken = gemaaktArr.length < MAX_RESTAURANTS_GEMAAKT;
     const keuzesHtml = `
       <div class="landing__choices">
-        ${kanNogMaken ? `
         <button class="choice-card" data-action="ga-maken">
           <div class="choice-card__title">Restaurant maken</div>
           <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
-        </button>` : ""}
+        </button>
         <button class="choice-card" data-action="ga-joinen">
           <div class="choice-card__title">Restaurant joinen</div>
           <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant — dit mag onbeperkt vaak.</p>
         </button>
-      </div>
-      ${kanNogMaken ? "" : `<p class="landing__limiet">Je hebt al ${MAX_RESTAURANTS_GEMAAKT} restaurants gemaakt op dit apparaat — dat is het maximum om zelf te maken. Vraag een eigenaar om je als teamlid te verwijderen, of vraag sitebeheer om een restaurant te verwijderen, om weer plek te maken. Joinen bij een restaurant met een code blijft wel gewoon onbeperkt mogelijk.</p>`}`;
+      </div>`;
 
     root.innerHTML = `
       <div class="landing">
@@ -2916,7 +2914,14 @@ root.addEventListener("click", e => {
   const id = el.dataset.id;
 
   switch(action){
-    case "ga-maken": state.landingScherm="maken"; state.foutmelding=""; render(); break;
+    case "ga-maken": {
+      const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
+      if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
+        toonToast(`Je hebt het maximum van ${MAX_RESTAURANTS_GEMAAKT} gemaakte restaurants al bereikt.`);
+        break;
+      }
+      state.landingScherm="maken"; state.foutmelding=""; render(); break;
+    }
     case "ga-joinen": state.landingScherm="joinen"; state.foutmelding=""; render(); break;
     case "ga-feedback": state.landingScherm="feedback"; state.foutmelding=""; render(); break;
     case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
