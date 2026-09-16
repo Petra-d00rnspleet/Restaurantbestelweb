@@ -26,8 +26,9 @@
   --wood-light:#d9a066;
   --wood-dark: #6b4423;
 
-  --text:      #f3ead9;
+  --text:      #e6c168;
   --text-dim:  #b7a58a;
+  --text-begin:#f3ead9;
 
   --display: "Playfair Display", Georgia, serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
@@ -88,7 +89,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .landing__eyebrow{
   font-family:var(--ui);
   font-weight:700;
-  color:var(--text);
+  color:var(--text-begin);
   font-size:.78rem;
   letter-spacing:.28em;
   text-transform:uppercase;
