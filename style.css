@@ -26,7 +26,7 @@
   --wood-light:#d9a066;
   --wood-dark: #6b4423;
 
-  --text:      #e6c168;
+  --text:      #ece1c9;
   --text-dim:  #b7a58a;
   --text-begin:#f3ead9;
 
@@ -106,7 +106,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 @supports ((-webkit-background-clip: text) or (background-clip: text)){
   .landing__title{
-    background:linear-gradient(90deg, #c8793c, #c15b3f, #d4a53a, #6f9463, #8a9baa, #c15b3f, #c8793c);
+    background:linear-gradient(90deg, #c8793c, #c15b3f, #a9713c, #6f9463, #8a9baa, #c15b3f, #c8793c);
     background-size:250% 100%;
     -webkit-background-clip:text;
     background-clip:text;
@@ -120,6 +120,87 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   100% { background-position:250% 50%; }
 }
 .landing__title span{ color:var(--flame); }
+
+/* ============================================================
+   TOPBAR — inlogbalkje bovenaan het startscherm
+   ============================================================ */
+.topbar{
+  width:100%;
+  max-width:640px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 16px;
+  margin:-16px auto 8px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  flex-wrap:wrap;
+}
+.topbar__merk{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  color:var(--text-begin);
+  font-size:1rem;
+  letter-spacing:.02em;
+}
+.topbar__account{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+}
+.topbar__naam{
+  font-family:var(--ui);
+  font-weight:600;
+  color:var(--text-begin);
+  font-size:.85rem;
+}
+.topbar__icon-btn{
+  background:transparent;
+  border:none;
+  color:var(--text-dim);
+  font-size:.85rem;
+  padding:2px 4px;
+  line-height:1;
+}
+.topbar__icon-btn:hover{ color:var(--text); }
+.topbar__naam-input{
+  width:140px;
+  padding:6px 10px;
+  font-size:.85rem;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+}
+.topbar__account-paneel{
+  width:100%;
+  max-width:340px;
+  margin:0 auto 8px;
+}
+.account-paneel__tabs{
+  display:flex;
+  gap:6px;
+  margin-bottom:14px;
+}
+.account-paneel__tab{
+  flex:1;
+  padding:8px 10px;
+  font-size:.8rem;
+  font-weight:600;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text-dim);
+}
+.account-paneel__tab--actief{
+  background:var(--flame);
+  border-color:var(--flame);
+  color:#fff;
+}
 .landing__divider{
   display:flex;
   align-items:center;
