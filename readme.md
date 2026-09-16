@@ -3,6 +3,7 @@
 Een klein bestelsysteem voor een restaurant: **Bestellen → Keuken → Bezorgen**,
 live gesynchroniseerd tussen alle apparaten via Firebase Realtime Database.
 
+- **Inloggen om te maken**: bovenaan het startscherm staat een balkje met "🔐 Inloggen" — zonder zo'n account kun je alleen **joinen** bij een restaurant met een code; "Restaurant maken" verschijnt pas na het aanmaken/inloggen van een account (e-mail, wachtwoord, zelfbedachte gebruikersnaam — die naam is later aan te passen). Zie "Inloggen (gewone accounts...)" verderop voor details.
 - **Naam invullen (verplicht)**: de allereerste keer dat je de site opent, vraagt hij eerst je naam — pas daarna kom je bij het startscherm. Dit is los van de naam die je later bij het maken/joinen van een restaurant invult. Deze naam blijft op je apparaat onthouden (net als je restaurants), en dient om jou als sitebeheerder te herkennen als je iemand op de banlijst wilt zetten (zie Sitebeheer hieronder).
 - **Restaurant maken/joinen**: bij het maken van een restaurant, én bij het joinen met een code, vul je ook je eigen naam in. Zo weet iedereen wie er in het team zit. Per apparaat/persoon kun je **maximaal 2 restaurants maken** — joinen bij een restaurant met een code mag daarnaast **onbeperkt vaak**, dat telt niet mee voor die 2. Zolang je nog een restaurant kunt máken, zie je op het startscherm de keuze "Restaurant maken"; heb je dat maximum bereikt, dan verdwijnt alleen die keuze — "Restaurant joinen" blijft altijd gewoon zichtbaar. Bovenaan het startscherm staan je eigen restaurants in twee apart gelabelde groepjes: **"Gemaakte restaurants"** en **"Gejoinde restaurants"**, zodat je in één oogopslag ziet wat je zelf hebt opgezet en waar je alleen bent aangesloten. Een restaurant kun je niet zelf uit je lijst verwijderen door het te "verlaten" — dat kan alleen doordat de eigenaar je als teamlid verwijdert, of doordat sitebeheer het hele restaurant verwijdert. Zolang je actief in een restaurant zit, kun je via **"🔀 Wissel restaurant"** (in de bovenbalk of onderaan Instellingen) gewoon teruggaan naar het startscherm om naar je andere restaurant te gaan — dat restaurant blijft daarbij gewoon in je lijst staan.
 - **Bestellen**: als er een plattegrond is ingesteld, zie je eerst de plattegrond — klik op een tafel om er een bestelling voor te plaatsen. Een tafel gaat op **bezet** zodra er een bestelling voor is verstuurd, en wordt pas weer **vrij** als je op "Tafel betaald" klikt. Er is ook altijd de optie "Bestelling zonder tafel" voor een bestelling die niet aan een tafel gekoppeld is. Klik producten aan (met emoji, uit een gecategoriseerde kiezer), voeg per product een notitie toe, verstuur de bestelling.
@@ -109,9 +110,19 @@ Dit werkt met een **echt account via Firebase Authentication** — er staat geen
 
 1. Ga in de Firebase-console naar **Build → Authentication** → **Get started**.
 2. Tab **Sign-in method** → zet **E-mail/wachtwoord** aan.
-3. Tab **Users** → **Add user** → vul jouw eigen e-mailadres en een sterk wachtwoord in. Dit is het account waarmee jij straks inlogt bij "⚙ Sitebeheer".
+3. Tab **Users** → **Add user** → vul jouw eigen e-mailadres en een sterk wachtwoord in. Dit is het account waarmee jij straks inlogt bij "⚙ Sitebeheer". Onthoud het **UID** dat Firebase aan dit account geeft (staat in de gebruikerslijst) — dat heb je zo meteen nog nodig.
+4. Ga naar **Realtime Database → Gegevens** en maak handmatig een regel aan: `beheerders/<UID> = true` (vervang `<UID>` door het UID uit stap 3). Dit is wat dit account écht tot sitebeheerder maakt — zonder deze regel kan iemand wél inloggen met dat e-mailadres/wachtwoord, maar krijgt diegene geen sitebeheer-rechten.
 
-Je kunt zoveel van deze accounts aanmaken als je wilt (bijv. voor jezelf en een collega) — verwijder een account in **Authentication → Users** om iemands toegang in te trekken.
+Je kunt zoveel van deze accounts aanmaken als je wilt (bijv. voor jezelf en een collega) — herhaal dan ook stap 4 voor dat account. Verwijder een account in **Authentication → Users** om iemands toegang in te trekken (de bijbehorende `beheerders/<UID>`-regel mag je dan ook weggooien, maar is verder onschadelijk).
+
+⚠️ **Belangrijk voor bestaande sites**: vroeger telde *elk* ingelogd Firebase-account automatisch als sitebeheerder. Nu bezoekers ook een eigen, gewoon account kunnen maken (zie "Inloggen" hieronder), zou dat elke nieuwe bezoeker per ongeluk sitebeheer-rechten geven — daarom is dat losgekoppeld via de `beheerders`-lijst hierboven. Heb je deze site al draaien? Voeg dan voor **elk** bestaand sitebeheer-account alsnog een `beheerders/<UID> = true`-regel toe (stap 4), anders verlies je zelf de toegang tot Sitebeheer.
+
+### Inloggen (gewone accounts, voor bezoekers)
+
+Bovenaan het startscherm staat een balkje met **"🔐 Inloggen"**. Dit is een heel gewoon account (ook via Firebase Authentication, hetzelfde mechanisme als hierboven, maar zonder sitebeheer-rechten) waarmee een bezoeker zelf een e-mailadres, wachtwoord en zelfbedachte **gebruikersnaam** instelt. Zonder zo'n account kun je alleen **joinen** bij een bestaand restaurant met een code — "Restaurant maken" verschijnt pas na inloggen. Eenmaal ingelogd:
+- zie je je gebruikersnaam in het balkje, met een ✏️ om 'm aan te passen;
+- zie je op het startscherm weer je **gemaakte restaurants** terug — ook op een ander apparaat, want die lijst hoort bij je account (`accounts/<UID>/restaurants`), niet (alleen) bij het apparaat.
+Dit staat volledig los van Sitebeheer hierboven: een gewoon account krijgt nooit sitebeheer-rechten, ook niet per ongeluk.
 
 ⚠️ Dit inlogscherm alleen is niet genoeg: zonder de databaseregels hieronder kan iemand die de Firebase-URL kent nog steeds rechtstreeks (buiten de site om) alle restaurantgegevens opvragen. De regels hieronder zorgen dat dát ook écht bij Firebase zelf wordt afgedwongen, niet alleen in de browser.
 
@@ -180,6 +191,18 @@ Ga naar **Realtime Database → Regels** en zet:
           ".write": true
         }
       }
+    },
+    "beheerders": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": false
+      }
+    },
+    "accounts": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "auth != null && auth.uid === $uid"
+      }
     }
   }
 }
@@ -194,6 +217,8 @@ Wat dit doet:
 - `gebruikers` (de site-brede naamlijst) werkt ook zo: elk apparaat mag zijn eigen ingevulde naam wegschrijven zonder in te loggen, maar de hele lijst tegelijk opvragen (wat het Sitebeheer-paneel doet) kan alleen met een geldige inlogsessie.
 - `bans` is net andersom: **schrijven** (iemand blokkeren/deblokkeren) kan alleen met een geldige inlogsessie, maar **lezen** staat open — dat is nodig omdat elk apparaat zonder in te loggen moet kunnen checken of het zelf geblokkeerd is. Dit betekent dat de banlijst (namen + apparaat-id's) in theorie door iedereen is op te vragen die rechtstreeks met de database praat; net als bij de restaurantcode is dit een bewuste, lichte keuze, geen lek van gevoeligere gegevens dan een naam.
 - Onder elke blokkade mag het bijbehorende apparaat wél zonder inloggen schrijven naar `bans/$apparaatId/berichten` — dat is het bezwaar-gesprek met sitebeheer (zie hieronder). Dit overschrijft alleen dat ene subpad; de blokkade zelf (`bans/$apparaatId`) blijft verder gewoon alleen met een geldige inlogsessie te zetten of te verwijderen.
+- `beheerders/<uid>` bepaalt wie écht sitebeheerder is: alleen dat ene account mag zijn eigen regel lezen (om te checken of het 'm zelf is), en **niemand** kan er via de site bij schrijven (`.write: false`) — die regel zet jij zelf handmatig in de Firebase-console (zie hierboven), nooit via de app.
+- `accounts/<uid>` is het gewone account van een bezoeker (gebruikersnaam + de restaurants die diegene gemaakt heeft): alleen dat account zelf mag zijn eigen gegevens lezen én schrijven.
 
 ⚠️ Let op: de restaurantcode (`$code`) zelf werkt nog steeds als een soort "wachtwoord" voor dat ene restaurant — wie de code weet of raadt, kan dat restaurant lezen/wijzigen. Dat is een bewuste, lichte keuze van dit project (net als bij een tafelbon-code) en geen verkeerde configuratie; alleen het **sitebeheer-gedeelte** (alle restaurants + systeemupdates) is nu met een echt account afgeschermd.
 
@@ -230,6 +255,17 @@ Daarna:
 ## Hoe de data eruitziet in Firebase
 
 ```
+beheerders/
+  <uid>: true                 ← handmatig gezet in de Firebase-console (zie Sitebeheer hierboven); alleen dit account krijgt sitebeheer-rechten
+accounts/
+  <uid>/ {                    ← gewoon account (bezoeker), ingelogd via het balkje bovenaan
+    username: "Sara",
+    email: "sara@voorbeeld.nl",
+    aangemaakt: <timestamp>,
+    restaurants: {
+      K3F7Q: { naam: "De Gouden Pan", ledId: "-Nlid..." }   ← restaurants die dit account gemaakt heeft
+    }
+  }
 gebruikers/                   ← site-brede lijst, los van een restaurant
   dev-abc123.../ {            ← apparaat-id (willekeurig, opgeslagen in localStorage)
     naam: "Sara",
