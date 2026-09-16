@@ -103,6 +103,14 @@ const state = {
   nieuwProductEmoji: "🍽️",
   emojiPickerOpen: false,
   bewerkMenuId: null,          // id van het product dat nu bewerkt wordt in Instellingen > Producten, of null
+
+  // ---------- account (echt account via Firebase Auth, los van sitebeheer) ----------
+  account: null,               // { uid, email, username } als je bent ingelogd met een eigen account, anders null
+  accountPaneelOpen: false,    // staat het inlog/registreer-vak boven in de topbar open?
+  accountModus: "inloggen",    // "inloggen" | "registreren" — welk tabblad in dat vak actief is
+  accountFoutmelding: "",
+  accountNaamBewerken: false,  // staat het veld om je gebruikersnaam aan te passen open?
+  accountNaamFout: "",
 };
 
 const MERKNAAM = "Restaurants";
@@ -267,6 +275,125 @@ function gebruikerRegistreren(){
   }
   db.ref("gebruikers/" + state.apparaatId).update(payload);
 }
+
+// ---------- account (echt account via Firebase Authentication) ----------
+// Los van sitebeheer (zie verderop): dit is een gewoon account waarmee een bezoeker zelf
+// restaurants kan máken — joinen met een code kan altijd, ook zonder account. Gebruikt
+// dezelfde Firebase Authentication als sitebeheer, maar is daar strikt los van: of iemand
+// sitebeheerder is, wordt bepaald door een aparte "beheerders/<uid>"-lijst in de database
+// (zie onAuthStateChanged onderaan), niet door simpelweg ingelogd te zijn.
+const MAX_LETTERS_ACCOUNT_NAAM = 20;
+let accountRestaurantenRef = null; // firebase-ref met de live-listener op je eigen account-restaurantlijst
+function accountPaneelOpenen(){
+  state.accountPaneelOpen = true;
+  state.accountFoutmelding = "";
+  render();
+}
+function accountPaneelSluiten(){
+  state.accountPaneelOpen = false;
+  state.accountFoutmelding = "";
+  render();
+}
+function accountModusWisselen(modus){
+  state.accountModus = modus;
+  state.accountFoutmelding = "";
+  render();
+}
+function accountRegistreren(username, email, wachtwoord){
+  username = (username || "").trim();
+  email = (email || "").trim();
+  wachtwoord = wachtwoord || "";
+  if(!username){ state.accountFoutmelding = "Vul een gebruikersnaam in."; render(); return; }
+  if(username.length > MAX_LETTERS_ACCOUNT_NAAM){ state.accountFoutmelding = `Maximaal ${MAX_LETTERS_ACCOUNT_NAAM} letters.`; render(); return; }
+  if(!email || !wachtwoord){ state.accountFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
+  if(wachtwoord.length < 6){ state.accountFoutmelding = "Een wachtwoord moet minstens 6 tekens bevatten."; render(); return; }
+  state.accountFoutmelding = "Bezig met account maken…";
+  render();
+  auth.createUserWithEmailAndPassword(email, wachtwoord)
+    .then(cred => db.ref("accounts/" + cred.user.uid).set({
+      username,
+      email,
+      aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+    }))
+    .then(() => {
+      state.accountPaneelOpen = false;
+      state.accountFoutmelding = "";
+      // De rest (state.account vullen, restaurantlijst ophalen) gebeurt via onAuthStateChanged.
+    })
+    .catch(err => {
+      state.accountFoutmelding = err.code === "auth/email-already-in-use" ? "Dit e-mailadres is al in gebruik."
+        : err.code === "auth/invalid-email" ? "Dit e-mailadres is ongeldig."
+        : "Account maken is niet gelukt. Probeer het opnieuw.";
+      render();
+    });
+}
+function accountInloggen(email, wachtwoord){
+  email = (email || "").trim();
+  wachtwoord = wachtwoord || "";
+  if(!email || !wachtwoord){ state.accountFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
+  state.accountFoutmelding = "Bezig met inloggen…";
+  render();
+  auth.signInWithEmailAndPassword(email, wachtwoord)
+    .then(() => {
+      state.accountPaneelOpen = false;
+      state.accountFoutmelding = "";
+    })
+    .catch(() => {
+      state.accountFoutmelding = "Onjuiste inloggegevens.";
+      render();
+    });
+}
+function accountUitloggen(){
+  auth.signOut();
+}
+function accountNaamBewerkenTogglen(){
+  state.accountNaamBewerken = !state.accountNaamBewerken;
+  state.accountNaamFout = "";
+  render();
+}
+function accountNaamOpslaan(nieuweNaam){
+  nieuweNaam = (nieuweNaam || "").trim();
+  if(!state.account) return;
+  if(!nieuweNaam){ state.accountNaamFout = "Vul een naam in."; render(); return; }
+  if(nieuweNaam.length > MAX_LETTERS_ACCOUNT_NAAM){ state.accountNaamFout = `Maximaal ${MAX_LETTERS_ACCOUNT_NAAM} letters.`; render(); return; }
+  db.ref("accounts/" + state.account.uid + "/username").set(nieuweNaam).then(() => {
+    state.account = { ...state.account, username: nieuweNaam };
+    state.accountNaamBewerken = false;
+    state.accountNaamFout = "";
+    render();
+  });
+}
+// Houdt de restaurants die je account gemaakt heeft live bij (op elk apparaat waar je inlogt),
+// en voegt ze toe aan "mijn restaurants" van dít apparaat als ze hier nog niet bekend zijn —
+// zo zie je na inloggen op een nieuw apparaat je gemaakte restaurants gewoon weer terug.
+function accountRestaurantenLuisteren(uid){
+  accountRestaurantenListenerStoppen();
+  accountRestaurantenRef = db.ref("accounts/" + uid + "/restaurants");
+  accountRestaurantenRef.on("value", snap => {
+    const data = snap.val() || {};
+    let gewijzigd = false;
+    Object.entries(data).forEach(([code, info]) => {
+      if(state.mijnRestaurants.some(r => r.code === code)) return; // al lokaal bekend op dit apparaat
+      state.mijnRestaurants.push({
+        code,
+        naam: (info && info.naam) || code,
+        ledId: (info && info.ledId) || null,
+        gebruikersNaam: state.siteGebruikersNaam || "",
+        type: "gemaakt",
+      });
+      gewijzigd = true;
+    });
+    if(gewijzigd){
+      localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
+      mijnRestaurantsEigenaarSyncStarten();
+    }
+    render();
+  });
+}
+function accountRestaurantenListenerStoppen(){
+  if(accountRestaurantenRef){ accountRestaurantenRef.off(); accountRestaurantenRef = null; }
+}
+
 const MAX_LETTERS_RESTAURANTNAAM = 10;   // standaardlimiet aantal tekens voor een restaurantnaam, tenzij sitebeheer voor dit restaurant een eigen limiet heeft ingesteld
 // De limiet die nu voor dít restaurant geldt: de eigen limiet van sitebeheer (state.naamLimiet)
 // als die gezet is, anders gewoon de standaardlimiet.
@@ -554,6 +681,10 @@ function zelfBestelQrAfbeeldingUrl(code){
 
 // ---------- firebase acties ----------
 function restaurantMaken(naam, eigenNaam){
+  if(!state.account){
+    state.foutmelding = "Log in om een restaurant te maken.";
+    render(); return;
+  }
   naam = naam.trim();
   eigenNaam = (eigenNaam || "").trim();
   const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
@@ -587,6 +718,9 @@ function restaurantMaken(naam, eigenNaam){
     ]).then(() => ledRef.key);
   }).then(ledId => {
     mijnRestaurantOpslaan(code, naam, ledId, eigenNaam, "gemaakt");
+    // Koppel het restaurant ook aan je account, zodat je 'm op een ander apparaat na inloggen
+    // gewoon terugziet (zie accountRestaurantenLuisteren hierboven).
+    db.ref("accounts/" + state.account.uid + "/restaurants/" + code).set({ naam, ledId });
     state.restaurantCode = code;
     state.restaurantNaam = naam;
     state.ledId = ledId;
@@ -1773,7 +1907,50 @@ function renderGeblokkeerd(){
     </div>`;
 }
 
+// Balkje bovenaan het startscherm met de inlogstatus: niet ingelogd → een "Inloggen"-knop die
+// het inlog/registreer-vak opent; wel ingelogd → je gebruikersnaam (met potlood om 'm aan te
+// passen) en een uitlog-knop.
+function renderTopbar(){
+  const rechts = state.account ? `
+    ${state.accountNaamBewerken ? `
+      <input id="topbar-naam-input" type="text" value="${state.account.username}" maxlength="${MAX_LETTERS_ACCOUNT_NAAM}" class="topbar__naam-input">
+      <button class="btn btn--flame btn--sm" data-action="account-naam-opslaan">Opslaan</button>
+      <button class="terug-link" data-action="account-naam-annuleren">Annuleren</button>
+    ` : `
+      <span class="topbar__naam">👤 ${state.account.username}</span>
+      <button class="topbar__icon-btn" data-action="account-naam-bewerken" title="Naam wijzigen">✏️</button>
+      <button class="btn btn--ghost btn--sm" data-action="account-uitloggen">Uitloggen</button>
+    `}
+  ` : `
+    <button class="btn btn--ghost btn--sm" data-action="account-paneel-openen">🔐 Inloggen</button>
+  `;
+  const paneel = (state.accountPaneelOpen && !state.account) ? `
+    <div class="form-card topbar__account-paneel">
+      <div class="account-paneel__tabs">
+        <button type="button" class="account-paneel__tab ${state.accountModus==='inloggen'?'account-paneel__tab--actief':''}" data-action="account-modus-inloggen">Inloggen</button>
+        <button type="button" class="account-paneel__tab ${state.accountModus==='registreren'?'account-paneel__tab--actief':''}" data-action="account-modus-registreren">Account maken</button>
+      </div>
+      ${state.accountModus === "registreren" ? `
+        <label class="form-card__label">Gebruikersnaam</label>
+        <input id="account-username" type="text" placeholder="Bijv. Sara" maxlength="${MAX_LETTERS_ACCOUNT_NAAM}">
+      ` : ""}
+      <label class="form-card__label">E-mailadres</label>
+      <input id="account-email" type="email" placeholder="jij@voorbeeld.nl">
+      <label class="form-card__label">Wachtwoord</label>
+      <input id="account-wachtwoord" type="password" placeholder="••••••••">
+      ${state.accountFoutmelding ? `<div class="fout">${state.accountFoutmelding}</div>` : ""}
+      <button class="btn btn--flame btn--block" data-action="${state.accountModus === "registreren" ? "account-registreren" : "account-inloggen"}">${state.accountModus === "registreren" ? "Account aanmaken" : "Inloggen"}</button>
+      <button class="terug-link" data-action="account-paneel-sluiten">← Sluiten</button>
+    </div>` : "";
+  return `
+    <div class="topbar">
+      <div class="topbar__merk">${MERKNAAM}</div>
+      <div class="topbar__account">${rechts}</div>
+    </div>
+    ${paneel}`;
+}
 function renderLanding(){
+  const topbar = renderTopbar();
   const merk = `
     <div class="landing__mark">
       <div class="landing__eyebrow">Welkom bij</div>
@@ -1803,8 +1980,11 @@ function renderLanding(){
         <div class="choice-card__title">Verder naar ${r.naam}</div>
         <p class="choice-card__desc">Code ${r.code} — ga er direct naartoe.</p>
       </button>`;
-    const restaurantsHtml = state.mijnRestaurants.length ? `
-      ${gemaaktArr.length ? `
+    // "Gemaakte restaurants" verschijnt alleen als je bent ingelogd (die restaurants horen bij
+    // je account) — ben je niet ingelogd, dan kun je alleen joinen, en zie je dus ook alleen de
+    // "Gejoinde restaurants"-groep terug.
+    const restaurantsHtml = (state.account ? gemaaktArr.length : 0) || gejoindArr.length ? `
+      ${(state.account && gemaaktArr.length) ? `
         <div class="landing__restaurant-groep">
           <div class="landing__restaurant-groep__titel">Gemaakte restaurants</div>
           <div class="landing__mijn-restaurants">
@@ -1823,10 +2003,15 @@ function renderLanding(){
     const kanNogMaken = gemaaktArr.length < MAX_RESTAURANTS_GEMAAKT;
     const keuzesHtml = `
       <div class="landing__choices">
+        ${state.account ? `
         <button class="choice-card" data-action="ga-maken">
           <div class="choice-card__title">Restaurant maken</div>
           <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
-        </button>
+        </button>` : `
+        <button class="choice-card" data-action="account-paneel-openen">
+          <div class="choice-card__title">🔐 Log in om een restaurant te maken</div>
+          <p class="choice-card__desc">Zonder account kun je alleen joinen bij een bestaand restaurant met een code.</p>
+        </button>`}
         <button class="choice-card" data-action="ga-joinen">
           <div class="choice-card__title">Restaurant joinen</div>
           <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant — dit mag onbeperkt vaak.</p>
@@ -1835,6 +2020,7 @@ function renderLanding(){
 
     root.innerHTML = `
       <div class="landing">
+        ${topbar}
         ${merk}
         <p class="landing__sub">Waar wilt u naartoe?</p>
         ${restaurantsHtml}
@@ -1848,9 +2034,11 @@ function renderLanding(){
         </div>
         <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
       </div>`;
+    accountFormListenersKoppelen();
   } else if(state.landingScherm === "maken"){
     root.innerHTML = `
       <div class="landing">
+        ${topbar}
         ${merk}
         <div class="form-card">
           <label class="form-card__label">Naam van je restaurant</label>
@@ -1866,9 +2054,11 @@ function renderLanding(){
       state.siteGebruikersNaam
     );
     document.getElementById("input-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuurMaken(); });
+    accountFormListenersKoppelen();
   } else if(state.landingScherm === "joinen"){
     root.innerHTML = `
       <div class="landing">
+        ${topbar}
         ${merk}
         <div class="form-card">
           <label class="form-card__label">Restaurantcode</label>
@@ -1883,9 +2073,11 @@ function renderLanding(){
       state.siteGebruikersNaam
     );
     document.getElementById("input-code").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
+    accountFormListenersKoppelen();
   } else if(state.landingScherm === "feedback"){
     root.innerHTML = `
       <div class="landing">
+        ${topbar}
         ${merk}
         <div class="form-card">
           <label class="form-card__label">Bericht naar sitebeheer</label>
@@ -1895,7 +2087,25 @@ function renderLanding(){
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
       </div>`;
+    accountFormListenersKoppelen();
   }
+}
+// Koppelt Enter-toetsen in het inlog/registreer-vak en het naam-bewerk-veldje van de topbar —
+// wordt na elke render van een landingscherm aangeroepen (het vak kan op elk landingscherm
+// open staan, dus dit staat los van welk sub-scherm er verder getoond wordt).
+function accountFormListenersKoppelen(){
+  const naamInput = document.getElementById("topbar-naam-input");
+  if(naamInput) naamInput.addEventListener("keydown", e => { if(e.key === "Enter") accountNaamOpslaan(naamInput.value); });
+  const emailInput = document.getElementById("account-email");
+  const wachtwoordInput = document.getElementById("account-wachtwoord");
+  const usernameInput = document.getElementById("account-username");
+  if(!emailInput || !wachtwoordInput) return;
+  const verstuur = () => state.accountModus === "registreren"
+    ? accountRegistreren(usernameInput ? usernameInput.value : "", emailInput.value, wachtwoordInput.value)
+    : accountInloggen(emailInput.value, wachtwoordInput.value);
+  emailInput.addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
+  wachtwoordInput.addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
+  if(usernameInput) usernameInput.addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
 }
 
 // ============================================================
@@ -2935,6 +3145,11 @@ root.addEventListener("click", e => {
 
   switch(action){
     case "ga-maken": {
+      if(!state.account){
+        toonToast("Log in om een restaurant te maken.");
+        accountPaneelOpenen();
+        break;
+      }
       const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
       if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
         toonToast(`Je hebt het maximum van ${MAX_RESTAURANTS_GEMAAKT} gemaakte restaurants al bereikt.`);
@@ -2994,6 +3209,30 @@ root.addEventListener("click", e => {
     case "historie-wissen": historieWissen(); break;
 
     case "chat-versturen": chatBerichtVersturen(document.getElementById("chat-tekst").value); break;
+
+    case "account-paneel-openen": accountPaneelOpenen(); break;
+    case "account-paneel-sluiten": accountPaneelSluiten(); break;
+    case "account-modus-inloggen": accountModusWisselen("inloggen"); break;
+    case "account-modus-registreren": accountModusWisselen("registreren"); break;
+    case "account-registreren":
+      accountRegistreren(
+        document.getElementById("account-username").value,
+        document.getElementById("account-email").value,
+        document.getElementById("account-wachtwoord").value
+      );
+      break;
+    case "account-inloggen":
+      accountInloggen(
+        document.getElementById("account-email").value,
+        document.getElementById("account-wachtwoord").value
+      );
+      break;
+    case "account-uitloggen": accountUitloggen(); break;
+    case "account-naam-bewerken": accountNaamBewerkenTogglen(); break;
+    case "account-naam-annuleren": accountNaamBewerkenTogglen(); break;
+    case "account-naam-opslaan":
+      accountNaamOpslaan(document.getElementById("topbar-naam-input").value);
+      break;
 
     case "beheer-open": beheerPaneelOpenen(); break;
     case "qr-printen": qrPrinten(); break;
@@ -3184,13 +3423,31 @@ db.ref("bans/" + state.apparaatId).on("value", snap => {
 // Als dit apparaat al eerder een naam heeft ingevuld, meteen de gebruikerslijst bijwerken
 // (laatste bezoek) — zo blijft Sitebeheer > Gebruikers actueel.
 if(state.siteGebruikersNaam) gebruikerRegistreren();
-// Houdt de sitebeheer-status bij op basis van Firebase Authentication (server-side gecontroleerd,
-// niet meer via localStorage) — vuurt ook meteen bij het laden als je nog een geldige sessie hebt.
+// Eén Firebase-sessie kan óf een gewoon account zijn (eigen restaurants maken), óf een
+// sitebeheer-account — dat wordt hier voor elke sessie apart uitgezocht: sitebeheer-status via
+// de "beheerders/<uid>"-lijst (zie readme.md voor hoe je jezelf daaraan toevoegt), een gewoon
+// account via "accounts/<uid>". Zonder deze scheiding zou elk zelfgeregistreerd account (via
+// het inlogvak bovenin) automatisch volledige sitebeheer-rechten krijgen — dat mag niet.
 auth.onAuthStateChanged(gebruiker => {
-  state.beheerderActief = !!gebruiker;
   state.beheerFoutmelding = "";
-  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
-  render();
+  if(!gebruiker){
+    state.beheerderActief = false;
+    state.account = null;
+    accountRestaurantenListenerStoppen();
+    render();
+    return;
+  }
+  db.ref("beheerders/" + gebruiker.uid).once("value").then(snap => {
+    state.beheerderActief = snap.val() === true;
+    if(state.beheerderActief && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
+    render();
+  });
+  db.ref("accounts/" + gebruiker.uid).once("value").then(snap => {
+    const data = snap.val();
+    state.account = { uid: gebruiker.uid, email: gebruiker.email, username: (data && data.username) || gebruiker.email };
+    accountRestaurantenLuisteren(gebruiker.uid);
+    render();
+  });
 });
 // Koppelt bij het opstarten meteen live listeners op de eigenaar-status van elk restaurant in
 // je lijst, zodat "Gemaakte"/"Gejoinde restaurants" op het startscherm altijd blijft kloppen —
