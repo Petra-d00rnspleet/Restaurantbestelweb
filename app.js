@@ -7,6 +7,13 @@
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 const auth = firebase.auth();
+// Tweede, volledig losstaande Firebase Auth-instantie, alleen voor het inloggen van
+// restaurant-eigenaren bij "Restaurant aanmaken". Bewust GEEN hergebruik van 'auth'
+// hierboven: die wordt in onAuthStateChanged (onderaan dit bestand) gebruikt om
+// state.beheerderActief te zetten. Als eigenaren via diezelfde 'auth' zouden inloggen,
+// zou iedere restaurant-eigenaar per ongeluk ook volledige sitebeheer-rechten krijgen.
+const eigenaarAuthApp = firebase.initializeApp(firebaseConfig, "eigenaarAuth");
+const eigenaarAuth = eigenaarAuthApp.auth();
 const root = document.getElementById("app");
 
 // ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
@@ -61,7 +68,11 @@ const state = {
   gebruikersNaam: null,        // jouw eigen naam
   mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam, type:"gemaakt"|"gejoind"}] — max 2 gemaakt, onbeperkt gejoind
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
-  landingScherm: "start",     // start | maken | joinen | feedback
+  landingScherm: "start",     // start | maken-login | maken | joinen | feedback
+  eigenaarAuthEmail: null,        // e-mail van de ingelogde restaurant-eigenaar (via eigenaarAuth), of null
+  eigenaarAuthModus: "inloggen",  // inloggen | registreren — welk tabblad actief is op het login-scherm
+  eigenaarAuthFoutmelding: "",
+  eigenaarAuthBezig: false,       // true tijdens het wachten op Firebase Auth (voorkomt dubbel klikken)
   huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
   instellingenTab: "algemeen", // algemeen | producten | achtergrond | plattegrond
   menu: {},
@@ -552,6 +563,48 @@ function zelfBestelQrAfbeeldingUrl(code){
   return "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + encodeURIComponent(zelfBestelUrl(code));
 }
 
+// ---------- inloggen als restaurant-eigenaar (vóór het aanmaken van een restaurant) ----------
+// Gebruikt de losstaande 'eigenaarAuth' hierboven — heeft niets te maken met sitebeheer.
+function eigenaarInloggenOfRegistreren(modus, email, wachtwoord){
+  email = (email || "").trim();
+  wachtwoord = wachtwoord || "";
+  if(state.eigenaarAuthBezig) return;
+  if(!email || !wachtwoord){
+    state.eigenaarAuthFoutmelding = "Vul e-mailadres en wachtwoord in.";
+    render(); return;
+  }
+  if(modus === "registreren" && wachtwoord.length < 6){
+    state.eigenaarAuthFoutmelding = "Kies een wachtwoord van minstens 6 tekens.";
+    render(); return;
+  }
+  state.eigenaarAuthBezig = true;
+  state.eigenaarAuthFoutmelding = "Bezig…";
+  render();
+  const actie = modus === "registreren"
+    ? eigenaarAuth.createUserWithEmailAndPassword(email, wachtwoord)
+    : eigenaarAuth.signInWithEmailAndPassword(email, wachtwoord);
+  actie.then(() => {
+    // state.eigenaarAuthEmail wordt gezet door eigenaarAuth.onAuthStateChanged (onderaan dit bestand);
+    // die render() erna is genoeg — hier alleen naar het naam-scherm door.
+    state.eigenaarAuthBezig = false;
+    state.eigenaarAuthFoutmelding = "";
+    state.landingScherm = "maken";
+    render();
+  }).catch(err => {
+    state.eigenaarAuthBezig = false;
+    if(err.code === "auth/email-already-in-use") state.eigenaarAuthFoutmelding = "Dit e-mailadres heeft al een account — klik op 'Inloggen'.";
+    else if(err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") state.eigenaarAuthFoutmelding = "Onjuist e-mailadres of wachtwoord.";
+    else if(err.code === "auth/user-not-found") state.eigenaarAuthFoutmelding = "Geen account gevonden met dit e-mailadres — klik op 'Account aanmaken'.";
+    else if(err.code === "auth/invalid-email") state.eigenaarAuthFoutmelding = "Vul een geldig e-mailadres in.";
+    else if(err.code === "auth/weak-password") state.eigenaarAuthFoutmelding = "Kies een wachtwoord van minstens 6 tekens.";
+    else state.eigenaarAuthFoutmelding = "Er ging iets mis: " + err.message;
+    render();
+  });
+}
+function eigenaarUitloggen(){
+  eigenaarAuth.signOut();
+}
+
 // ---------- firebase acties ----------
 function restaurantMaken(naam, eigenNaam){
   naam = naam.trim();
@@ -582,6 +635,8 @@ function restaurantMaken(naam, eigenNaam){
         eigenaar: true,
         rechten: { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true },
         aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+        eigenaarEmail: eigenaarAuth.currentUser ? eigenaarAuth.currentUser.email : null,
+        eigenaarUid: eigenaarAuth.currentUser ? eigenaarAuth.currentUser.uid : null,
       }),
       catRef.set({ naam: "Overig", aangemaakt: firebase.database.ServerValue.TIMESTAMP }),
     ]).then(() => ledRef.key);
@@ -1848,11 +1903,36 @@ function renderLanding(){
         </div>
         <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
       </div>`;
+  } else if(state.landingScherm === "maken-login"){
+    const registreren = state.eigenaarAuthModus === "registreren";
+    root.innerHTML = `
+      <div class="landing">
+        ${merk}
+        <div class="form-card">
+          <label class="form-card__label">E-mailadres</label>
+          <input id="eigenaar-email" type="email" placeholder="jij@voorbeeld.nl" autofocus>
+          <label class="form-card__label">Wachtwoord</label>
+          <input id="eigenaar-wachtwoord" type="password" placeholder="••••••••">
+          ${registreren ? `<p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Minstens 6 tekens. Met dit account kun je je restaurant later terugvinden.</p>` : ""}
+          ${state.eigenaarAuthFoutmelding ? `<div class="fout">${state.eigenaarAuthFoutmelding}</div>` : ""}
+          <button class="btn btn--flame btn--block" data-action="eigenaar-auth-verstuur" ${state.eigenaarAuthBezig?"disabled":""}>${registreren ? "Account aanmaken" : "Inloggen"}</button>
+          <button class="terug-link" data-action="eigenaar-auth-wissel-modus">${registreren ? "Heb je al een account? Inloggen" : "Nog geen account? Account aanmaken"}</button>
+          <button class="terug-link" data-action="terug-landing">← Terug</button>
+        </div>
+      </div>`;
+    const verstuur = () => eigenaarInloggenOfRegistreren(
+      state.eigenaarAuthModus,
+      document.getElementById("eigenaar-email").value,
+      document.getElementById("eigenaar-wachtwoord").value
+    );
+    document.getElementById("eigenaar-email").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
+    document.getElementById("eigenaar-wachtwoord").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
   } else if(state.landingScherm === "maken"){
     root.innerHTML = `
       <div class="landing">
         ${merk}
         <div class="form-card">
+          ${state.eigenaarAuthEmail ? `<p style="color:var(--text-dim); font-size:.75rem; margin:-4px 0 14px;">Ingelogd als ${state.eigenaarAuthEmail} · <a href="#" data-action="eigenaar-uitloggen" style="color:var(--flame);">uitloggen</a></p>` : ""}
           <label class="form-card__label">Naam van je restaurant</label>
           <input id="input-naam" type="text" placeholder="Bijv. GoudenPan" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" autofocus>
           <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>
@@ -2940,8 +3020,26 @@ root.addEventListener("click", e => {
         toonToast(`Je hebt het maximum van ${MAX_RESTAURANTS_GEMAAKT} gemaakte restaurants al bereikt.`);
         break;
       }
-      state.landingScherm="maken"; state.foutmelding=""; render(); break;
+      state.foutmelding = "";
+      state.eigenaarAuthFoutmelding = "";
+      state.landingScherm = eigenaarAuth.currentUser ? "maken" : "maken-login";
+      render(); break;
     }
+    case "eigenaar-auth-wissel-modus":
+      state.eigenaarAuthModus = state.eigenaarAuthModus === "registreren" ? "inloggen" : "registreren";
+      state.eigenaarAuthFoutmelding = "";
+      render(); break;
+    case "eigenaar-auth-verstuur":
+      eigenaarInloggenOfRegistreren(
+        state.eigenaarAuthModus,
+        document.getElementById("eigenaar-email").value,
+        document.getElementById("eigenaar-wachtwoord").value
+      );
+      break;
+    case "eigenaar-uitloggen":
+      eigenaarUitloggen();
+      state.landingScherm = "start";
+      render(); break;
     case "ga-joinen": state.landingScherm="joinen"; state.foutmelding=""; render(); break;
     case "ga-feedback": state.landingScherm="feedback"; state.foutmelding=""; render(); break;
     case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
@@ -3190,6 +3288,12 @@ auth.onAuthStateChanged(gebruiker => {
   state.beheerderActief = !!gebruiker;
   state.beheerFoutmelding = "";
   if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
+  render();
+});
+// Losstaande login-status voor restaurant-eigenaren (zie eigenaarAuth hierboven) — heeft geen
+// enkele invloed op state.beheerderActief / sitebeheer.
+eigenaarAuth.onAuthStateChanged(gebruiker => {
+  state.eigenaarAuthEmail = gebruiker ? gebruiker.email : null;
   render();
 });
 // Koppelt bij het opstarten meteen live listeners op de eigenaar-status van elk restaurant in
