@@ -110,6 +110,7 @@ const state = {
   accountModus: "inloggen",    // "inloggen" | "registreren" — welk tabblad in dat vak actief is
   accountFoutmelding: "",
   accountNaamBewerken: false,  // staat het veld om je gebruikersnaam aan te passen open?
+  accountNaamMenuOpen: false,  // is het potlood (naam wijzigen) zichtbaar na klikken op je naam in de topbar?
   accountNaamFout: "",
 };
 
@@ -349,6 +350,12 @@ function accountUitloggen(){
 function accountNaamBewerkenTogglen(){
   state.accountNaamBewerken = !state.accountNaamBewerken;
   state.accountNaamFout = "";
+  render();
+}
+// Klap het potlood (naam wijzigen) open/dicht — verschijnt pas nadat je op je naam
+// in de topbar hebt geklikt, in plaats van altijd zichtbaar te staan naast Uitloggen.
+function accountNaamMenuTogglen(){
+  state.accountNaamMenuOpen = !state.accountNaamMenuOpen;
   render();
 }
 function accountNaamOpslaan(nieuweNaam){
@@ -1917,8 +1924,8 @@ function renderTopbar(){
       <button class="btn btn--flame btn--sm" data-action="account-naam-opslaan">Opslaan</button>
       <button class="terug-link" data-action="account-naam-annuleren">Annuleren</button>
     ` : `
-      <span class="topbar__naam">👤 ${state.account.username}</span>
-      <button class="topbar__icon-btn" data-action="account-naam-bewerken" title="Naam wijzigen">✏️</button>
+      <span class="topbar__naam" data-action="account-naam-menu-togglen" style="cursor:pointer;" title="Klik voor opties">👤 ${state.account.username}</span>
+      ${state.accountNaamMenuOpen ? `<button class="topbar__icon-btn" data-action="account-naam-bewerken" title="Naam wijzigen">✏️</button>` : ""}
       <button class="btn btn--ghost btn--sm" data-action="account-uitloggen">Uitloggen</button>
     `}
   ` : `
@@ -3228,6 +3235,7 @@ root.addEventListener("click", e => {
       );
       break;
     case "account-uitloggen": accountUitloggen(); break;
+    case "account-naam-menu-togglen": accountNaamMenuTogglen(); break;
     case "account-naam-bewerken": accountNaamBewerkenTogglen(); break;
     case "account-naam-annuleren": accountNaamBewerkenTogglen(); break;
     case "account-naam-opslaan":
@@ -3433,6 +3441,8 @@ auth.onAuthStateChanged(gebruiker => {
   if(!gebruiker){
     state.beheerderActief = false;
     state.account = null;
+    state.accountNaamMenuOpen = false;
+    state.accountNaamBewerken = false;
     accountRestaurantenListenerStoppen();
     render();
     return;
