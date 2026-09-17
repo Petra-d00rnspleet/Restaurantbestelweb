@@ -319,6 +319,7 @@ function accountRegistreren(username, email, wachtwoord){
     .then(() => {
       state.accountPaneelOpen = false;
       state.accountFoutmelding = "";
+      render();
       // De rest (state.account vullen, restaurantlijst ophalen) gebeurt via onAuthStateChanged.
     })
     .catch(err => {
@@ -338,6 +339,7 @@ function accountInloggen(email, wachtwoord){
     .then(() => {
       state.accountPaneelOpen = false;
       state.accountFoutmelding = "";
+      render();
     })
     .catch(() => {
       state.accountFoutmelding = "Onjuiste inloggegevens.";
@@ -1299,10 +1301,22 @@ function beheerInloggen(naam, email, wachtwoord){
   state.beheerFoutmelding = "Bezig met inloggen…";
   render();
   auth.signInWithEmailAndPassword(email, wachtwoord)
-    .then(() => {
+    .then(cred => {
       beheerPogingenOpslaan({ aantal: 0, geblokkeerdTot: 0 });
       beheerPogingLoggen(naam, email, true);
-      // state.beheerderActief wordt door onAuthStateChanged hieronder op true gezet, incl. render()
+      // Zelf meteen de beheerder-check doen en de melding wegnemen, in plaats van alleen op
+      // onAuthStateChanged te wachten: die vuurt niet opnieuw af als je met dit account al
+      // was ingelogd (bijv. omdat het ook je gewone account is) — dan bleef "Bezig met
+      // inloggen…" anders voor altijd staan.
+      db.ref("beheerders/" + cred.user.uid).once("value").then(snap => {
+        state.beheerderActief = snap.val() === true;
+        state.beheerFoutmelding = state.beheerderActief ? "" : "Dit account heeft geen sitebeheer-rechten.";
+        if(state.beheerderActief){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
+        render();
+      }).catch(() => {
+        state.beheerFoutmelding = "";
+        render();
+      });
     })
     .catch(() => {
       beheerPogingLoggen(naam, email, false);
@@ -1914,9 +1928,10 @@ function renderGeblokkeerd(){
     </div>`;
 }
 
-// Balkje bovenaan het startscherm met de inlogstatus: niet ingelogd → een "Inloggen"-knop die
-// het inlog/registreer-vak opent; wel ingelogd → je gebruikersnaam (met potlood om 'm aan te
-// passen) en een uitlog-knop.
+// Balkje bovenaan het startscherm met de inlogstatus: niet ingelogd → een rond pilletje
+// "Inloggen" (met een klein rondje ervoor) dat het inlog/registreer-vak opent; wel ingelogd →
+// hetzelfde ronde pilletje maar dan met je naam (klik erop voor het potlood om 'm aan te
+// passen) en daarnaast een uitlog-knop.
 function renderTopbar(){
   const rechts = state.account ? `
     ${state.accountNaamBewerken ? `
@@ -1924,12 +1939,16 @@ function renderTopbar(){
       <button class="btn btn--flame btn--sm" data-action="account-naam-opslaan">Opslaan</button>
       <button class="terug-link" data-action="account-naam-annuleren">Annuleren</button>
     ` : `
-      <span class="topbar__naam" data-action="account-naam-menu-togglen" style="cursor:pointer;" title="Klik voor opties">👤 ${state.account.username}</span>
+      <button type="button" class="topbar__pil" data-action="account-naam-menu-togglen" title="Klik voor opties">
+        <span class="topbar__pil-rondje">👤</span> ${state.account.username}
+      </button>
       ${state.accountNaamMenuOpen ? `<button class="topbar__icon-btn" data-action="account-naam-bewerken" title="Naam wijzigen">✏️</button>` : ""}
       <button class="btn btn--ghost btn--sm" data-action="account-uitloggen">Uitloggen</button>
     `}
   ` : `
-    <button class="btn btn--ghost btn--sm" data-action="account-paneel-openen">🔐 Inloggen</button>
+    <button type="button" class="topbar__pil" data-action="account-paneel-openen">
+      <span class="topbar__pil-rondje">🔐</span> Inloggen
+    </button>
   `;
   const paneel = (state.accountPaneelOpen && !state.account) ? `
     <div class="form-card topbar__account-paneel">
