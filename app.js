@@ -1,3486 +1,1680 @@
 /* ============================================================
-   RESTAURANTS — app.js
-   Alle logica: routing, Firebase Realtime Database sync,
-   en het renderen van elk scherm.
+   TICKET — design tokens
+   Wereld: een verfijnd, avondlijk restaurant. Warm kastanjebruin-
+   zwart, een zachte gouden accent, en elegante italic serif
+   voor namen en titels — bestelbonnen blijven als warme,
+   crèmekleurige papieren bonnetjes.
    ============================================================ */
+:root{
+  --bg:        #150f0b;
+  --bg-2:      #1c1410;
+  --panel:     #221a14;
+  --panel-2:   #2b2119;
+  --line:      #3d3025;
 
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-const auth = firebase.auth();
-const root = document.getElementById("app");
+  --paper:     #f6efe1;
+  --paper-2:   #ece1c9;
+  --ink:       #241a12;
+  --ink-dim:   #6b5c48;
 
-// ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
-// Migreert automatisch vanaf de oude opslag (vóór meerdere restaurants per apparaat mogelijk waren).
-function laadMijnRestaurants(){
-  try {
-    const raw = localStorage.getItem("ticket_restaurants");
-    if(raw) return JSON.parse(raw) || [];
-  } catch(e) {}
-  const oudeCode = localStorage.getItem("ticket_code");
-  if(oudeCode){
-    const migratie = [{
-      code: oudeCode,
-      naam: localStorage.getItem("ticket_naam") || oudeCode,
-      ledId: localStorage.getItem("ticket_lid_id") || null,
-      gebruikersNaam: localStorage.getItem("ticket_lid_naam") || "",
-    }];
-    localStorage.setItem("ticket_restaurants", JSON.stringify(migratie));
-    localStorage.removeItem("ticket_code");
-    localStorage.removeItem("ticket_naam");
-    localStorage.removeItem("ticket_lid_id");
-    localStorage.removeItem("ticket_lid_naam");
-    return migratie;
-  }
-  return [];
+  --flame:     #c8793c;
+  --flame-dark:#a35f2a;
+  --ember:     #c15b3f;
+  --fresh:     #6f9463;
+  --steel-blue:#8a9baa;
+  --wood:      #a9713c;
+  --wood-light:#d9a066;
+  --wood-dark: #6b4423;
+
+  --text:      #f3ead9;
+  --text-dim:  #b7a58a;
+
+  --display: "Playfair Display", Georgia, serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --ui: "Inter", system-ui, sans-serif;
+
+  --radius: 3px;
 }
-function laadGelezenUpdates(){
-  try { return JSON.parse(localStorage.getItem("ticket_gelezen_updates") || "[]") || []; }
-  catch(e){ return []; }
+
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  background:
+    radial-gradient(1200px 800px at 50% -10%, #2a1f16 0%, transparent 60%),
+    radial-gradient(900px 700px at 100% 100%, #1f1610 0%, transparent 55%),
+    var(--bg);
+  background-repeat:repeat;
+  color:var(--text);
+  font-family:var(--ui);
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
 }
-// ---------- site-brede identiteit (los van een specifiek restaurant) ----------
-// Elk apparaat/browser krijgt één keer een willekeurig, blijvend apparaat-id (in localStorage) —
-// hierop wordt een eventuele blokkade door sitebeheer gekoppeld, zodat een andere naam invullen
-// een blokkade niet omzeilt.
-function laadApparaatId(){
-  let id = localStorage.getItem("ticket_apparaat_id");
-  if(!id){
-    id = "dev-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
-    localStorage.setItem("ticket_apparaat_id", id);
-    apparaatIsNieuw = true;
-  }
-  return id;
+#app{ min-height:100vh; display:flex; flex-direction:column; }
+
+button{ font-family:inherit; cursor:pointer; }
+input, textarea{ font-family:inherit; }
+::selection{ background:var(--flame); color:#fff; }
+
+/* focus visibility */
+button:focus-visible, input:focus-visible, textarea:focus-visible{
+  outline:2px solid var(--flame);
+  outline-offset:2px;
 }
-let apparaatIsNieuw = false; // true als dit apparaat/browser hier voor het eerst komt (net een nieuw apparaat-id gekregen)
 
-// ---------- status ----------
-const state = {
-  restaurantCode: null,
-  restaurantNaam: null,
-  naamLimiet: null,            // eigen letterlimiet voor de restaurantnaam, indien sitebeheer die heeft ingesteld (anders MAX_LETTERS_RESTAURANTNAAM)
-  ledId: null,                 // jouw teamlid-id binnen dit restaurant
-  gebruikersNaam: null,        // jouw eigen naam
-  mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam, type:"gemaakt"|"gejoind"}] — max 2 gemaakt, onbeperkt gejoind
-  actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
-  landingScherm: "start",     // start | maken | joinen | feedback
-  huidigeView: "bestellen",   // bestellen | keuken | bezorgen | historie | instellingen
-  instellingenTab: "algemeen", // algemeen | producten | achtergrond | plattegrond
-  menu: {},
-  bestellingen: {},
-  historie: {},
-  categorieen: {},             // categorieën van het huidige restaurant
-  leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
-  ledenGeladen: false,
-  chat: {},                    // teamchat van het huidige restaurant: { berichtId: {ledId, naam, tekst, tijdstip} }
-  waarschuwing: null,          // { tekst, tijdstip } — actieve waarschuwing van sitebeheer aan dit restaurant, of null
-  thema: null,                 // { achtergrond, tekst } — eigen kleuren voor dit restaurant
-  plattegrond: {},              // { "rij-kolom": {type:"tafel"|"stoel"} }
-  plattegrondTool: "tafel",
-  siteUpdates: {},
-  bewerkSiteUpdateId: null,    // id van de systeemupdate die nu bewerkt wordt in sitebeheer, of null
-  gelezenUpdates: laadGelezenUpdates(),   // ids van systeemupdates die je al als gelezen hebt gemarkeerd
-  apparaatId: laadApparaatId(),           // blijvend, willekeurig id van dit apparaat/deze browser
-  siteGebruikersNaam: localStorage.getItem("ticket_site_naam") || null, // naam die je invult vóór je de site in mag
-  siteNaamInvoerFout: "",
-  geblokkeerd: null,               // { naam, sinds, totEnMet } als dit apparaat geblokkeerd is door sitebeheer, anders null
-  geblokkeerdGecontroleerd: false, // is de eerste blokkade-check al binnengekomen? (voorkomt flitsen van de site vóór de check klaar is)
-  gebruikersLijst: {},             // alle apparaten die ooit een naam hebben ingevuld (alleen geladen als het beheerpaneel open is)
-  gebruikersLijstGeladen: false,
-  bansLijst: {},                   // alle actieve/verlopen blokkades (alleen geladen als het beheerpaneel open is)
-  beheerBanChatOpenId: null,       // apparaatId waarvan het berichten-paneel nu open staat in sitebeheer, of null
-  beheerderActief: false,  // wordt gezet door Firebase Auth (zie onAuthStateChanged onderaan), niet meer lokaal opgeslagen
-  beheerPaneelOpen: false,     // is het sitebeheer-vak (wachtwoord-beveiligd) open?
-  beheerFoutmelding: "",
-  alleRestaurants: {},          // alle restaurants in de database, alleen geladen als het beheerpaneel open is
-  alleRestaurantsGeladen: false,
-  sitebeheerPogingen: {},        // recente in- en mislukte inlogpogingen bij Sitebeheer (alleen geladen als het paneel open is)
-  feedback: {},                   // berichten van restaurant-eigenaren aan sitebeheer (alleen geladen als het paneel open is)
-  beheerBezoekModus: false,     // ben je als beheerder een restaurant van iemand anders aan het bekijken/bewerken?
-  winkelwagen: {},            // { itemId: {naam, prijs, aantal, notitie, emoji, categorie} }
-  bestelModus: "plattegrond",  // plattegrond | producten — welk scherm van Bestellen actief is (alleen relevant als er tafels zijn ingesteld)
-  actieveTafelCel: null,       // welke plattegrondcel ("rij-kolom") er nu besteld wordt, of null
-  tafel: "",
-  foutmelding: "",
-  nieuwProductEmoji: "🍽️",
-  emojiPickerOpen: false,
-  bewerkMenuId: null,          // id van het product dat nu bewerkt wordt in Instellingen > Producten, of null
-
-  // ---------- account (echt account via Firebase Auth, los van sitebeheer) ----------
-  account: null,               // { uid, email, username } als je bent ingelogd met een eigen account, anders null
-  accountPaneelOpen: false,    // staat het inlog/registreer-vak boven in de topbar open?
-  accountModus: "inloggen",    // "inloggen" | "registreren" — welk tabblad in dat vak actief is
-  accountFoutmelding: "",
-  accountNaamBewerken: false,  // staat het veld om je gebruikersnaam aan te passen open?
-  accountNaamMenuOpen: false,  // is het potlood (naam wijzigen) zichtbaar na klikken op je naam in de topbar?
-  accountNaamFout: "",
-};
-
-const MERKNAAM = "Restaurants";
-const MAX_RESTAURANTS_GEMAAKT = 2; // alleen het aantal dat je zelf máákt is beperkt — joinen mag onbeperkt
-const MAX_PRODUCTEN_PER_BESTELLING = 20; // max. totaal aantal producten (som van aantallen) in één bestelling
-const MAX_LETTERS_PRODUCTNAAM = 20;      // max. aantal tekens voor een productnaam
-const MAX_LETTERS_SITE_NAAM = 20;        // max. aantal tekens voor de site-brede gebruikersnaam
-
-// Standaardrechten voor een nieuw teamlid dat joint (de eigenaar kan dit later aanpassen).
-const STANDAARD_RECHTEN = { bestellen:true, keuken:false, bezorgen:false, historie:false, instellingen:false };
-const RECHTEN_DEFINITIES = [
-  { key:"bestellen",    label:"Bestellen" },
-  { key:"keuken",       label:"Keuken" },
-  { key:"bezorgen",     label:"Bezorgen" },
-  { key:"historie",     label:"Historie" },
-  { key:"instellingen", label:"Instellingen" },
-];
-// Tabbladen waarvoor je het meldinggeluid apart aan/uit kunt zetten — meerdere tegelijk mag.
-const MELDING_VIEWS_DEFINITIES = [
-  { key:"bestellen", label:"Bestellen 🛒" },
-  { key:"keuken",    label:"Keuken 🍳" },
-  { key:"bezorgen",  label:"Bezorgen 🚚" },
-  { key:"historie",  label:"Historie 🕓" },
-  { key:"voorraad",  label:"Voorraad 📦" },
-];
-
-const EMOJI_CATEGORIEEN = {
-  "Fastfood": ["🍔","🍕","🌭","🥪","🌮","🌯","🍗","🥓","🍟","🥙","🥩","🍖","🧆"],
-  "Warme maaltijd": ["🍝","🍜","🍲","🍛","🍱","🍣","🥘","🫕","🍳","🥟","🍤","🫓","🥡"],
-  "Groente & fruit": ["🥗","🍎","🍌","🍊","🍇","🍓","🍉","🥑","🥕","🍒","🍍","🥝","🍑","🥭","🍋","🍅","🌽","🥦"],
-  "Bakkerij & zoet": ["🍰","🧁","🍩","🍪","🍦","🍫","🍮","🥧","🥐","🍯","🍭","🍬","🥯"],
-  "Dranken": ["🥤","☕","🍺","🍷","🍹","🧃","🍵","🥃","🧉","🥛","🍸","🧋"],
-};
-
-// Patronen die als subtiele achtergrondtextuur gekozen kunnen worden (naast een eigen kleur).
-const PATROON_OPTIES = [
-  { key:"geen",   naam:"Geen patroon", emoji:"" },
-  { key:"vlam",   naam:"Vlammen",      emoji:"🔥" },
-  { key:"bord",   naam:"Bord & bestek",emoji:"🍽️" },
-  { key:"wijn",   naam:"Wijnglas",     emoji:"🍷" },
-  { key:"koffie", naam:"Koffie",       emoji:"☕" },
-  { key:"peper",  naam:"Zout & peper", emoji:"🧂" },
-  { key:"taart",  naam:"Taart",        emoji:"🍰" },
-];
-// Lettertypen die voor de hele app gekozen kunnen worden. "ui" wordt gebruikt voor de meeste
-// tekst, "css" voor de sierlijke titels — meestal dezelfde familie, voor een consistent geheel.
-const LETTERTYPE_OPTIES = [
-  { key:"standaard",    naam:"Standaard",    ui:'"Inter", system-ui, sans-serif',  css:'"Playfair Display", Georgia, serif' },
-  { key:"poppins",      naam:"Poppins",      ui:'"Poppins", sans-serif',           css:'"Poppins", sans-serif' },
-  { key:"merriweather", naam:"Merriweather", ui:'"Merriweather", serif',           css:'"Merriweather", serif' },
-  { key:"montserrat",   naam:"Montserrat",   ui:'"Montserrat", sans-serif',        css:'"Montserrat", sans-serif' },
-  { key:"oswald",       naam:"Oswald",       ui:'"Oswald", sans-serif',            css:'"Oswald", sans-serif' },
-  { key:"lora",         naam:"Lora",         ui:'"Lora", serif',                   css:'"Lora", serif' },
-  { key:"pacifico",     naam:"Pacifico",     ui:'"Pacifico", cursive',             css:'"Pacifico", cursive' },
-  { key:"caveat",       naam:"Caveat",       ui:'"Caveat", cursive',               css:'"Caveat", cursive' },
-  { key:"bebas",        naam:"Bebas Neue",   ui:'"Bebas Neue", sans-serif',        css:'"Bebas Neue", sans-serif' },
-  { key:"dancing",      naam:"Dancing Script", ui:'"Dancing Script", cursive',     css:'"Dancing Script", cursive' },
-  { key:"abril",        naam:"Abril Fatface", ui:'"Abril Fatface", serif',         css:'"Abril Fatface", serif' },
-  { key:"quicksand",    naam:"Quicksand",    ui:'"Quicksand", sans-serif',         css:'"Quicksand", sans-serif' },
-  { key:"josefin",      naam:"Josefin Sans", ui:'"Josefin Sans", sans-serif',      css:'"Josefin Sans", sans-serif' },
-  { key:"bitter",       naam:"Bitter",       ui:'"Bitter", serif',                 css:'"Bitter", serif' },
-  { key:"comfortaa",    naam:"Comfortaa",    ui:'"Comfortaa", sans-serif',         css:'"Comfortaa", sans-serif' },
-  { key:"crimson",      naam:"Crimson Pro",  ui:'"Crimson Pro", serif',            css:'"Crimson Pro", serif' },
-];
-// Vormen voor vakken (invoervelden, knoppen, kaarten, ...) door de hele app — bepaalt de
-// hoek-afronding via de globale --radius-variabele, net zoals lettertype dat voor --ui/--display doet.
-const VORM_OPTIES = [
-  { key:"standaard", naam:"Scherp",         radius:"3px" },
-  { key:"zacht",     naam:"Licht afgerond", radius:"10px" },
-  { key:"rond",      naam:"Afgerond",       radius:"18px" },
-  { key:"pil",       naam:"Pil",            radius:"999px" },
-];
-// Meldinggeluid bij een nieuwe bestelling: alleen "geen" (uit) of "eigen" (zelf geüpload,
-// zie thema.geluidEigenData) — er zit geen kant-en-klare lijst met geluiden meer in.
-const GELUID_MAX_BYTES = 400 * 1024; // eigen upload — grotere bestanden worden zwaar voor de database
-
-// ---------- helpers ----------
-// Slaat (of werkt bij) een restaurant op in de lijst "mijn restaurants" van dit apparaat.
-// "type" ("gemaakt" of "gejoind") bepaalt in welk groepje het straks op het startscherm
-// verschijnt — laat je 'm weg (bijv. bij het bijwerken van alleen de naam), dan blijft het
-// bestaande type gewoon staan. Voor oudere, al opgeslagen restaurants (van vóór dit onderscheid
-// bestond) is er geen echt type bekend; die vallen dan terug op "gemaakt".
-function mijnRestaurantOpslaan(code, naam, ledId, gebruikersNaam, type){
-  const index = state.mijnRestaurants.findIndex(r => r.code === code);
-  const bestaandType = index >= 0 ? state.mijnRestaurants[index].type : undefined;
-  const entry = { code, naam, ledId, gebruikersNaam, type: type || bestaandType || "gemaakt" };
-  if(index >= 0) state.mijnRestaurants[index] = entry;
-  else state.mijnRestaurants.push(entry);
-  localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-  // Meteen (opnieuw) een live listener op de eigenaar-status koppelen — nodig voor nieuw
-  // toegevoegde restaurants, en onschadelijk voor bestaande (die worden overgeslagen, zie
-  // hieronder).
-  mijnRestaurantsEigenaarSyncStarten();
+@media (prefers-reduced-motion: reduce){
+  *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
 }
-// Haalt een restaurant uit de lijst "mijn restaurants" (dit apparaat) — gebeurt automatisch
-// (verwijderd door eigenaar of sitebeheer) én meteen zodra je zelf wisselt, verwijdert of verlaat.
-function mijnRestaurantVerwijderenUitLijst(code){
-  state.mijnRestaurants = state.mijnRestaurants.filter(r => r.code !== code);
-  localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-  mijnRestaurantsEigenaarSyncStoppen(code);
+
+/* ============================================================
+   LANDING
+   ============================================================ */
+.landing{
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  padding:32px 20px;
+  text-align:center;
+  gap:36px;
 }
-// Het "type" (gemaakt/gejoind) wordt lokaal opgeslagen op het moment dat je een restaurant
-// maakt of joint, en verandert daarna nooit meer vanzelf — terwijl eigenaarschap wél kan
-// wisselen (overdragen, mede-eigenaar worden, je eigen eigenaarschap intrekken, of een
-// sitebeheer-overrule) door IEMAND ANDERS, op een ANDER apparaat, terwijl jij al gewoon op het
-// startscherm zit. Een simpele eenmalige controle (bijv. alleen bij het opstarten van de pagina)
-// is dan niet genoeg: als je de pagina niet ververst, zie je de wissel nooit. Daarom houden we
-// hier voor elk restaurant in de lijst een PERMANENTE live-listener aan op de eigenaar-status
-// van je eigen lidmaatschap — die corrigeert het groepje ("Gemaakte" / "Gejoinde restaurants")
-// altijd meteen, ongeacht welk scherm je op dat moment open hebt staan of wie de wissel deed.
-const mijnRestaurantsEigenaarListeners = {}; // code -> firebase ref met actieve listener
-function mijnRestaurantsEigenaarSyncStarten(){
-  state.mijnRestaurants.forEach(r => {
-    if(!r.ledId || mijnRestaurantsEigenaarListeners[r.code]) return; // al een listener actief
-    const ref = db.ref("restaurants/" + r.code + "/leden/" + r.ledId + "/eigenaar");
-    mijnRestaurantsEigenaarListeners[r.code] = ref;
-    ref.on("value", snap => {
-      const idx = state.mijnRestaurants.findIndex(x => x.code === r.code);
-      if(idx < 0) return; // ondertussen al uit de lijst verwijderd (verwijderd/verlaten)
-      const juisteType = snap.val() === true ? "gemaakt" : "gejoind";
-      if(state.mijnRestaurants[idx].type !== juisteType){
-        state.mijnRestaurants[idx] = { ...state.mijnRestaurants[idx], type: juisteType };
-        localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-        render();
-      }
-    });
-  });
+.landing__mark{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:14px;
 }
-// Ontkoppelt de listener voor één restaurant (bijv. omdat het net uit "mijn restaurants" is
-// verwijderd), zodat er geen listeners blijven hangen op restaurants die je niet meer volgt.
-function mijnRestaurantsEigenaarSyncStoppen(code){
-  if(mijnRestaurantsEigenaarListeners[code]){
-    mijnRestaurantsEigenaarListeners[code].off();
-    delete mijnRestaurantsEigenaarListeners[code];
+.landing__eyebrow{
+  font-family:var(--ui);
+  font-weight:700;
+  color:var(--text);
+  font-size:.78rem;
+  letter-spacing:.28em;
+  text-transform:uppercase;
+}
+.landing__title{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  letter-spacing:0;
+  font-size:clamp(3rem, 9vw, 5.6rem);
+  margin:0;
+  line-height:1;
+  color:#c8793c; /* fallback voor browsers zonder gradient-tekst-ondersteuning */
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)){
+  .landing__title{
+    background:linear-gradient(90deg, #c8793c, #c15b3f, #d4a53a, #6f9463, #8a9baa, #c15b3f, #c8793c);
+    background-size:250% 100%;
+    -webkit-background-clip:text;
+    background-clip:text;
+    -webkit-text-fill-color:transparent;
+    color:transparent;
+    animation:landingTitelKleur 10s linear infinite;
   }
 }
-// ---------- site-brede gebruikersnaam (verplicht vóór de rest van de site) ----------
-// Slaat de ingevulde naam lokaal op en registreert/werkt dit apparaat bij in de site-brede
-// gebruikerslijst (voor Sitebeheer > Gebruikers) — los van welk restaurant je straks kiest.
-function siteNaamOpslaan(naam){
-  naam = (naam || "").trim();
-  if(!naam){ state.siteNaamInvoerFout = "Vul je naam in."; render(); return; }
-  if(naam.length > MAX_LETTERS_SITE_NAAM){ state.siteNaamInvoerFout = `Maximaal ${MAX_LETTERS_SITE_NAAM} letters.`; render(); return; }
-  state.siteNaamInvoerFout = "";
-  state.siteGebruikersNaam = naam;
-  localStorage.setItem("ticket_site_naam", naam);
-  gebruikerRegistreren();
-  render();
+@keyframes landingTitelKleur{
+  0%   { background-position:0% 50%; }
+  100% { background-position:250% 50%; }
 }
-function gebruikerRegistreren(){
-  // Let op: geen voorafgaande .once("value")-lees hier — dat mag voor gewone bezoekers
-  // niet (gebruikers > .read staat alleen open voor ingelogde beheerders), dus dat zou hier
-  // stil vastlopen voor iedereen behalve Sitebeheer zelf. In plaats daarvan onthouden we
-  // lokaal (apparaatIsNieuw) of dit een gloednieuw apparaat-id is, en schrijven we direct.
-  const payload = {
-    naam: state.siteGebruikersNaam,
-    laatsteBezoek: firebase.database.ServerValue.TIMESTAMP,
-  };
-  if(apparaatIsNieuw){
-    payload.eersteBezoek = firebase.database.ServerValue.TIMESTAMP;
-    apparaatIsNieuw = false;
+.landing__title span{ color:var(--flame); }
+.landing__divider{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  width:180px;
+}
+.landing__divider::before,
+.landing__divider::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:linear-gradient(90deg, transparent, var(--flame-dark));
+}
+.landing__divider::after{ background:linear-gradient(90deg, var(--flame-dark), transparent); }
+.landing__diamond{
+  width:7px; height:7px;
+  background:var(--flame);
+  transform:rotate(45deg);
+  flex-shrink:0;
+}
+.landing__sub{
+  font-family:var(--display);
+  font-style:italic;
+  color:var(--text-dim);
+  font-size:1.15rem;
+  letter-spacing:.01em;
+  max-width:440px;
+  margin:0;
+}
+
+.landing__choices{
+  display:flex;
+  gap:18px;
+  flex-wrap:wrap;
+  justify-content:center;
+  margin-top:8px;
+}
+.choice-card{
+  width:230px;
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:28px 22px;
+  text-align:center;
+  color:var(--text);
+  transition:transform .15s ease, border-color .15s ease, background .15s ease;
+  position:relative;
+  overflow:hidden;
+}
+.choice-card::after{
+  content:"";
+  position:absolute; inset:auto 0 0 0; height:2px;
+  background:var(--flame);
+  transform:scaleX(0); transform-origin:center;
+  transition:transform .25s ease;
+}
+.choice-card:hover{ transform:translateY(-3px); border-color:var(--flame-dark); background:var(--panel-2); }
+.choice-card:hover::after{ transform:scaleX(1); }
+.choice-card--actief{
+  border-color:var(--flame-dark);
+  background:var(--panel-2);
+}
+.choice-card--actief::after{ transform:scaleX(1); }
+.choice-card__num{
+  display:none;
+}
+.choice-card__title{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  font-size:1.5rem;
+  margin:0 0 8px;
+  letter-spacing:0;
+}
+.choice-card__desc{
+  font-size:.83rem;
+  color:var(--text-dim);
+  margin:0;
+  line-height:1.5;
+}
+
+.form-card{
+  width:min(380px, 90vw);
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:28px;
+  text-align:left;
+}
+.form-card__label{
+  display:block;
+  font-family:var(--mono);
+  font-size:.72rem;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  margin-bottom:8px;
+}
+.form-card input{
+  width:100%;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:12px 14px;
+  font-size:1rem;
+  margin-bottom:16px;
+}
+.form-card input:focus{ border-color:var(--flame); }
+.form-card .fout{
+  color:var(--ember);
+  font-family:var(--mono);
+  font-size:.8rem;
+  margin:-8px 0 14px;
+}
+
+.btn{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:none;
+  border-radius:var(--radius);
+  padding:12px 20px;
+  font-weight:600;
+  font-size:.92rem;
+  letter-spacing:.02em;
+}
+.btn--flame{ background:var(--flame); color:#1a0f08; }
+.btn--flame:hover{ background:#ff6f3a; }
+.btn--ghost{ background:transparent; color:var(--text-dim); border:1px solid var(--line); }
+.btn--ghost:hover{ color:var(--text); border-color:var(--text-dim); }
+.btn--block{ width:100%; }
+.btn--sm{ padding:8px 14px; font-size:.8rem; }
+.btn--fresh{ background:var(--fresh); color:#0c1f10; }
+.btn--fresh:hover{ background:#4dbb5e; }
+.btn--steel{ background:var(--steel-blue); color:#0c1c24; }
+.btn--steel:hover{ background:#93b3c6; }
+
+.terug-link{
+  background:none; border:none; color:var(--text-dim);
+  font-family:var(--mono); font-size:.8rem;
+  margin-top:14px; text-decoration:underline; text-underline-offset:3px;
+}
+.terug-link:hover{ color:var(--text); }
+
+/* ============================================================
+   DASHBOARD SHELL
+   ============================================================ */
+.shell{ flex:1; display:flex; flex-direction:column; min-height:100vh; }
+
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:14px 22px;
+  background:var(--bg-2);
+  border-bottom:1px solid var(--line);
+  gap:14px;
+  flex-wrap:wrap;
+}
+.topbar__id{ display:flex; align-items:center; gap:12px; }
+.topbar__flame{ width:26px; height:26px; }
+.topbar__naam{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  letter-spacing:0;
+  font-size:1.25rem;
+}
+.topbar__code{
+  font-family:var(--mono);
+  font-size:.72rem;
+  color:var(--text-dim);
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:4px 8px;
+  cursor:pointer;
+}
+.topbar__code:hover{ border-color:var(--flame); color:var(--text); }
+.topbar__gebruiker{
+  font-family:var(--mono);
+  font-size:.75rem;
+  color:var(--text-dim);
+}
+
+.tabs{
+  display:flex;
+  gap:6px;
+  padding:10px 22px;
+  background:var(--bg);
+  border-bottom:1px solid var(--line);
+  overflow-x:auto;
+}
+.tab{
+  background:transparent;
+  border:1px solid transparent;
+  color:var(--text-dim);
+  font-family:var(--ui);
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.14em;
+  font-size:.72rem;
+  padding:10px 16px;
+  border-radius:var(--radius);
+  white-space:nowrap;
+  position:relative;
+}
+.tab:hover{ color:var(--text); }
+.tab.actief{ color:var(--flame); background:var(--panel); border-color:var(--line); }
+.tab .badge{
+  display:inline-block;
+  margin-left:7px;
+  background:var(--flame);
+  color:#1a0f08;
+  font-family:var(--mono);
+  font-size:.68rem;
+  padding:1px 6px;
+  border-radius:10px;
+}
+
+.view{
+  flex:1;
+  padding:22px;
+  max-width:1200px;
+  width:100%;
+  margin:0 auto;
+}
+.view-titel{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  letter-spacing:0;
+  font-size:1.7rem;
+  margin:0 0 18px;
+}
+
+.subtabs{
+  display:flex;
+  gap:6px;
+  flex-wrap:wrap;
+  margin-bottom:20px;
+  border-bottom:1px solid var(--line);
+  padding-bottom:14px;
+}
+.subtab{
+  background:transparent;
+  border:1px solid var(--line);
+  color:var(--text-dim);
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-size:.7rem;
+  padding:8px 14px;
+  border-radius:20px;
+}
+.subtab:hover{ color:var(--text); border-color:var(--text-dim); }
+.subtab.actief{ color:#1a0f08; background:var(--flame); border-color:var(--flame); }
+
+.leeg{
+  border:1px dashed var(--line);
+  border-radius:var(--radius);
+  padding:40px 20px;
+  text-align:center;
+  color:var(--text-dim);
+  font-family:var(--mono);
+  font-size:.9rem;
+}
+
+/* ============================================================
+   BESTELLEN
+   ============================================================ */
+.bestel-layout{
+  display:grid;
+  grid-template-columns:1fr 340px;
+  gap:22px;
+  align-items:start;
+}
+@media (max-width: 860px){
+  .bestel-layout{ grid-template-columns:1fr; }
+}
+
+.categorie-titel{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.16em;
+  font-size:.72rem;
+  color:var(--flame);
+  margin:28px 0 14px;
+}
+.categorie-titel:first-child{ margin-top:0; }
+.categorie-titel::after{
+  content:"";
+  flex:1;
+  height:1px;
+  background:linear-gradient(90deg, var(--flame-dark), transparent);
+  opacity:.55;
+}
+
+.product-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(160px,1fr));
+  gap:14px;
+}
+.product-card{
+  background:linear-gradient(160deg, var(--panel-2) 0%, var(--panel) 100%);
+  border:1px solid var(--line);
+  border-radius:16px;
+  padding:16px 14px;
+  text-align:left;
+  color:var(--text);
+  transition:border-color .18s ease, transform .18s ease, box-shadow .18s ease;
+  position:relative;
+  overflow:hidden;
+  box-shadow:0 2px 8px rgba(0,0,0,.25);
+}
+.product-card::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:radial-gradient(130px 100px at 15% -10%, rgba(200,121,60,.16), transparent 70%);
+  opacity:0;
+  transition:opacity .18s ease;
+  pointer-events:none;
+}
+.product-card:hover{
+  border-color:var(--flame);
+  transform:translateY(-4px) scale(1.015);
+  box-shadow:0 14px 26px rgba(0,0,0,.35), 0 0 0 1px rgba(200,121,60,.22);
+}
+.product-card:hover::before{ opacity:1; }
+.product-card__naam{ font-weight:700; font-size:.94rem; margin-bottom:6px; letter-spacing:.01em; }
+.product-card__prijs{
+  display:inline-block;
+  font-family:var(--mono);
+  color:var(--flame);
+  font-size:.78rem;
+  background:rgba(200,121,60,.14);
+  padding:3px 10px;
+  border-radius:20px;
+  letter-spacing:.02em;
+}
+.product-card__plus{
+  position:absolute; top:12px; right:12px;
+  width:26px; height:26px;
+  border-radius:50%;
+  background:linear-gradient(135deg, var(--flame), var(--flame-dark));
+  color:#1a0f08;
+  display:flex; align-items:center; justify-content:center;
+  font-weight:800; font-size:1.05rem;
+  opacity:0; transform:scale(.6) rotate(-45deg);
+  transition:opacity .18s ease, transform .18s ease;
+  box-shadow:0 4px 12px rgba(200,121,60,.45);
+}
+.product-card:hover .product-card__plus{ opacity:1; transform:scale(1) rotate(0deg); }
+.product-card__opties{ font-size:.85rem; margin-left:2px; }
+.product-card--uitverkocht{
+  opacity:.4;
+  cursor:not-allowed;
+  filter:grayscale(.5);
+}
+.product-card--uitverkocht:hover{ transform:none; border-color:var(--line); box-shadow:0 2px 8px rgba(0,0,0,.25); }
+.product-card--uitverkocht:hover::before{ opacity:0; }
+.product-card__uitverkocht-badge{
+  position:absolute; top:12px; right:12px;
+  font-family:var(--mono);
+  font-size:.6rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  background:var(--ember);
+  color:#1a0f08;
+  padding:3px 8px;
+  border-radius:10px;
+  box-shadow:0 3px 8px rgba(0,0,0,.3);
+}
+
+.wagen{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:18px;
+  position:sticky;
+  top:16px;
+}
+.wagen__titel{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  letter-spacing:0;
+  font-size:1.2rem;
+  margin:0 0 12px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.wagen__regel{
+  border-bottom:1px solid var(--line);
+  padding:10px 0;
+}
+.wagen__regel:last-of-type{ border-bottom:none; }
+.wagen__regel-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:8px;
+}
+.wagen__regel-naam{ font-size:.88rem; font-weight:600; }
+.wagen__aantal{
+  display:flex; align-items:center; gap:6px;
+  font-family:var(--mono);
+}
+.wagen__aantal button{
+  width:22px; height:22px;
+  border-radius:50%;
+  border:1px solid var(--line);
+  background:var(--bg-2);
+  color:var(--text);
+  line-height:1;
+  font-size:.9rem;
+}
+.wagen__aantal button:hover{ border-color:var(--flame); color:var(--flame); }
+.wagen__select{
+  width:100%;
+  margin-top:8px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:.78rem;
+  padding:7px 9px;
+}
+.wagen__checkbox{
+  display:flex; align-items:center; gap:7px;
+  margin-top:8px;
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--text-dim);
+}
+.wagen__checkbox input{ accent-color:var(--flame); }
+.wagen__notitie{
+  width:100%;
+  margin-top:8px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-family:var(--mono);
+  font-size:.78rem;
+  padding:7px 9px;
+}
+.wagen__notitie::placeholder{ color:#5b5346; }
+.wagen__verwijder{
+  background:none; border:none; color:var(--ink-dim);
+  font-size:.75rem; text-decoration:underline; padding:0; margin-top:6px;
+}
+.wagen__verwijder:hover{ color:var(--ember); }
+
+.wagen__tafel{
+  width:100%;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  padding:9px 11px;
+  font-size:.85rem;
+  margin-bottom:14px;
+}
+
+.wagen__totaal{
+  display:flex; justify-content:space-between;
+  font-family:var(--mono);
+  margin:14px 0;
+  font-size:.95rem;
+}
+
+/* ============================================================
+   TICKETS (keuken / bezorgen) — signature element
+   ============================================================ */
+.ticket-kolommen{
+  display:grid;
+  grid-template-columns:repeat(auto-fit, minmax(300px,1fr));
+  gap:20px;
+}
+.ticket-kolom__titel{
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.14em;
+  font-size:.75rem;
+  color:var(--text-dim);
+  margin-bottom:12px;
+  display:flex; align-items:center; gap:8px;
+}
+.ticket-kolom__titel .stip{
+  width:8px; height:8px; border-radius:50%;
+  display:inline-block;
+}
+.stip--nieuw{ background:var(--flame); box-shadow:0 0 8px var(--flame); }
+.stip--bereiden{ background:var(--steel-blue); box-shadow:0 0 8px var(--steel-blue); }
+.stip--klaar{ background:var(--fresh); box-shadow:0 0 8px var(--fresh); }
+
+.ticket-stack{ display:flex; flex-direction:column; gap:16px; }
+
+.ticket{
+  position:relative;
+  background:var(--paper);
+  color:var(--ink);
+  border-radius:2px;
+  padding:18px 18px 16px;
+  font-family:var(--mono);
+  box-shadow:0 10px 24px rgba(0,0,0,.35);
+  animation:print-in .32s ease;
+}
+@keyframes print-in{
+  from{ transform:translateY(-14px); opacity:0; }
+  to{ transform:translateY(0); opacity:1; }
+}
+/* perforated torn top edge */
+.ticket::before{
+  content:"";
+  position:absolute;
+  top:-1px; left:0; right:0; height:9px;
+  background-image: radial-gradient(circle at 7px 0, var(--bg) 5px, transparent 5.5px);
+  background-size:14px 9px;
+  background-repeat:repeat-x;
+}
+.ticket__top{
+  display:flex; justify-content:space-between; align-items:baseline;
+  border-bottom:1px dashed var(--ink-dim);
+  padding-bottom:8px; margin-bottom:10px;
+}
+.ticket__nr{ font-weight:600; font-size:.85rem; letter-spacing:.03em; }
+.ticket__tijd{ font-size:.72rem; color:var(--ink-dim); }
+.ticket__verwijder{
+  background:none; border:none; color:var(--ink-dim);
+  font-size:1rem; line-height:1; padding:0 0 0 10px; margin-left:auto;
+  cursor:pointer;
+}
+.ticket__verwijder:hover{ color:var(--ember); }
+.ticket__tafel{
+  font-size:.72rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--flame-dark);
+  margin-bottom:8px;
+  font-weight:600;
+}
+.ticket__items{ list-style:none; margin:0 0 12px; padding:0; }
+.ticket__item{ padding:4px 0; font-size:.86rem; line-height:1.35; }
+.ticket__item b{ display:inline-block; min-width:22px; }
+.ticket__item-notitie{
+  display:block;
+  color:var(--flame-dark);
+  font-size:.76rem;
+  padding-left:22px;
+  font-style:italic;
+}
+.ticket__acties{ display:flex; gap:8px; }
+.ticket__acties .btn{ flex:1; }
+
+.ticket--stempel{
+  overflow:hidden;
+}
+.stempel{
+  position:absolute;
+  top:38%;
+  right:8%;
+  transform:rotate(-16deg);
+  border:3px solid var(--fresh);
+  color:var(--fresh);
+  font-family:var(--display);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-weight:700;
+  font-size:1.05rem;
+  padding:4px 12px;
+  border-radius:4px;
+  opacity:.85;
+  pointer-events:none;
+}
+
+/* ============================================================
+   INSTELLINGEN
+   ============================================================ */
+.instel-blok{
+  background:var(--panel);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:20px;
+  margin-bottom:20px;
+}
+.instel-blok__titel{
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  letter-spacing:0;
+  font-size:1.15rem;
+  margin:0 0 14px;
+}
+.code-tonen{
+  display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+}
+.code-tonen__code{
+  font-family:var(--mono);
+  font-size:1.6rem;
+  letter-spacing:.1em;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:10px 16px;
+}
+
+.menu-form{
+  display:grid;
+  grid-template-columns:auto 2fr 1fr 1fr auto;
+  gap:10px;
+  margin-bottom:18px;
+  align-items:start;
+}
+@media (max-width:700px){
+  .menu-form{ grid-template-columns:1fr 1fr; }
+}
+.menu-form input,
+.menu-form select{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:9px 11px;
+  font-size:.88rem;
+}
+.menu-form select:disabled{ opacity:.5; cursor:not-allowed; }
+
+.categorie-lijst{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+  margin-bottom:16px;
+}
+.categorie-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  background:linear-gradient(135deg, var(--panel-2), var(--panel));
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:7px 7px 7px 13px;
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--text);
+  box-shadow:0 3px 8px rgba(0,0,0,.22);
+  transition:border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.categorie-chip::before{ content:"🏷️"; font-size:.82rem; }
+.categorie-chip:hover{ border-color:var(--flame); transform:translateY(-1px); box-shadow:0 5px 14px rgba(0,0,0,.3); }
+.categorie-chip__x{
+  background:rgba(193,91,63,.16);
+  border:none;
+  color:var(--text-dim);
+  font-size:.8rem;
+  line-height:1;
+  width:20px; height:20px;
+  border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  transition:background .15s ease, color .15s ease;
+}
+.categorie-chip__x:hover{ color:#fff; background:var(--ember); }
+.categorie-form{
+  display:flex;
+  gap:10px;
+  max-width:420px;
+}
+.categorie-form input{
+  flex:1;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:20px;
+  padding:9px 16px;
+  font-size:.88rem;
+  transition:border-color .15s ease;
+}
+.categorie-form input:focus{ border-color:var(--flame); }
+
+.menu-form__opties{
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+  margin:-8px 0 18px;
+}
+.menu-form__optie{
+  display:flex; align-items:center; gap:7px;
+  font-family:var(--mono);
+  font-size:.78rem;
+  color:var(--text-dim);
+}
+.menu-form__optie input{ accent-color:var(--flame); }
+
+.cat--uitverkocht{ color:var(--ember) !important; }
+
+.voorraad-lijst{ list-style:none; margin:0; padding:0; }
+.voorraad-rij{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:.9rem;
+}
+.voorraad-rij:last-child{ border-bottom:none; }
+.voorraad-rij--uitverkocht .voorraad-rij__naam{ color:var(--text-dim); text-decoration:line-through; }
+.voorraad-toggle{
+  display:flex; align-items:center; gap:7px;
+  font-family:var(--mono);
+  font-size:.72rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  color:var(--text-dim);
+}
+.voorraad-toggle input{ accent-color:var(--ember); }
+
+.emoji-kiezer{ position:relative; }
+.emoji-kiezer__knop{
+  width:42px; height:42px;
+  font-size:1.3rem;
+  line-height:1;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+}
+.emoji-kiezer__knop:hover{ border-color:var(--flame); }
+.emoji-grid{
+  position:absolute;
+  top:48px; left:0; z-index:20;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  padding:10px;
+  width:250px;
+  max-height:280px;
+  overflow-y:auto;
+  box-shadow:0 12px 26px rgba(0,0,0,.45);
+}
+.emoji-grid__categorie{
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  font-size:.65rem;
+  color:var(--flame);
+  margin:10px 0 5px;
+}
+.emoji-grid__categorie:first-child{ margin-top:0; }
+.emoji-grid__rij{
+  display:grid;
+  grid-template-columns:repeat(6,1fr);
+  gap:3px;
+}
+.emoji-grid__rij button{
+  background:transparent;
+  border:1px solid transparent;
+  border-radius:4px;
+  font-size:1.15rem;
+  line-height:1;
+  padding:5px 0;
+}
+.emoji-grid__rij button:hover{ background:var(--bg-2); }
+.emoji-grid__rij button.actief{ border-color:var(--flame); background:var(--bg-2); }
+
+.update-lijst{ list-style:none; margin:0; padding:0; }
+.update-lijst li{
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:.88rem;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+}
+.update-lijst li > div{ display:flex; flex-direction:column; gap:3px; }
+.update-lijst li:last-child{ border-bottom:none; }
+.update-lijst__datum{
+  font-family:var(--mono);
+  font-size:.7rem;
+  color:var(--flame);
+  letter-spacing:.03em;
+  margin-right:8px;
+}
+.update-lijst__titel{
+  font-weight:700;
+  margin-right:6px;
+}
+.update-lijst__acties{ display:flex; gap:2px; flex-shrink:0; }
+.update-lijst__bewerk-rij{ flex-direction:column; align-items:stretch; gap:10px; }
+.update-lijst__bewerk-rij input{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:9px 11px;
+  font-size:.88rem;
+  width:100%;
+}
+
+.update-form{ display:flex; flex-direction:column; gap:10px; margin-bottom:18px; }
+.update-form input{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:9px 11px;
+  font-size:.88rem;
+}
+.update-form__row{ display:flex; gap:10px; }
+.update-form__row input{ flex:1; }
+
+/* ============================================================
+   TEAM & RECHTEN
+   ============================================================ */
+.team-lijst{ display:flex; flex-direction:column; gap:4px; }
+.team-rij{
+  display:grid;
+  grid-template-columns:140px 170px 1fr auto;
+  gap:12px;
+  align-items:center;
+  padding:12px 0;
+  border-bottom:1px solid var(--line);
+}
+.team-rij:last-child{ border-bottom:none; }
+@media (max-width:820px){
+  .team-rij{ grid-template-columns:1fr; }
+}
+.team-rij__naam{ font-weight:600; font-size:.9rem; }
+.team-rij__badge{
+  font-family:var(--mono);
+  font-size:.62rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--flame);
+  border:1px solid var(--flame-dark);
+  border-radius:10px;
+  padding:1px 7px;
+  margin-left:6px;
+}
+.team-rij__functie{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:7px 9px;
+  font-size:.82rem;
+}
+.team-rij__rechten{
+  display:flex; flex-wrap:wrap; gap:10px 14px;
+}
+.team-recht{
+  display:flex; align-items:center; gap:5px;
+  font-family:var(--mono);
+  font-size:.72rem;
+  color:var(--text-dim);
+}
+.team-recht input{ accent-color:var(--flame); }
+
+/* ============================================================
+   SITEBEHEER
+   ============================================================ */
+.beheer-badge{
+  font-family:var(--mono);
+  font-size:.62rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--ember);
+  border:1px solid var(--ember);
+  border-radius:10px;
+  padding:2px 8px;
+}
+.beheer-rest-lijst{ display:flex; flex-direction:column; gap:4px; }
+.beheer-rest-rij{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:14px;
+  flex-wrap:wrap;
+  padding:14px 0;
+  border-bottom:1px solid var(--line);
+}
+.beheer-rest-rij:last-child{ border-bottom:none; }
+.beheer-rest-rij__naam{ font-weight:600; font-size:.95rem; }
+.beheer-rest-rij__meta{
+  font-family:var(--mono);
+  font-size:.72rem;
+  color:var(--text-dim);
+  margin-top:4px;
+}
+.beheer-rest-rij__acties{ display:flex; gap:8px; flex-shrink:0; }
+.beheer-rest-rij__leden{
+  font-size:.78rem;
+  color:var(--text-dim);
+  margin-top:6px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.beheer-rest-rij__eigenaar{ color:var(--text); }
+.beheer-rest-rij__overige{ color:var(--text-dim); }
+.beheer-rest-rij__waarschuwing{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  margin-top:8px;
+  padding:8px 10px;
+  background:rgba(193,91,63,.12);
+  border:1px solid var(--ember);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-size:.8rem;
+}
+.beheer-rest-rij__waarschuwing-tijd{
+  font-family:var(--mono);
+  font-size:.66rem;
+  color:var(--text-dim);
+}
+.beheer-rest-rij__waarschuwing .verwijder-x{ margin-left:auto; flex-shrink:0; }
+
+/* ============================================================
+   WAARSCHUWING-BANNER (in het restaurant zelf, van sitebeheer)
+   ============================================================ */
+.waarschuwing-banner{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding:12px 24px;
+  background:rgba(193,91,63,.15);
+  border-bottom:1px solid var(--ember);
+  color:var(--text);
+}
+.waarschuwing-banner__icoon{ color:var(--ember); font-size:1.1rem; flex-shrink:0; }
+.waarschuwing-banner__tekst{ flex:1; font-size:.88rem; line-height:1.4; }
+.waarschuwing-banner__sluiten{
+  flex-shrink:0;
+  background:none;
+  border:none;
+  color:var(--text-dim);
+  font-size:1rem;
+  line-height:1;
+  padding:4px;
+}
+.waarschuwing-banner__sluiten:hover{ color:var(--ember); }
+
+/* ============================================================
+   BAN-CHAT (bericht tussen geblokkeerd apparaat en sitebeheer)
+   ============================================================ */
+.ban-chat{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin:14px 0 0;
+  max-height:260px;
+  overflow-y:auto;
+  padding-right:2px;
+}
+.ban-chat__bericht{
+  padding:8px 12px;
+  border-radius:var(--radius);
+  font-size:.85rem;
+  line-height:1.4;
+  max-width:85%;
+}
+.ban-chat__bericht--gebruiker{
+  align-self:flex-start;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+}
+.ban-chat__bericht--beheer{
+  align-self:flex-end;
+  background:rgba(193,91,63,.15);
+  border:1px solid var(--ember);
+}
+.ban-chat__afzender{
+  font-family:var(--mono);
+  font-size:.66rem;
+  color:var(--text-dim);
+  letter-spacing:.03em;
+  margin-bottom:3px;
+  text-transform:uppercase;
+}
+.ban-chat__tekst{ color:var(--text); white-space:pre-wrap; word-break:break-word; }
+.ban-chat--beheer{ margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+
+/* ============================================================
+   TEAMCHAT (chat tussen alle teamleden binnen één restaurant)
+   ============================================================ */
+.team-chat{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin:0;
+  max-height:420px;
+  overflow-y:auto;
+  padding-right:2px;
+}
+.team-chat__bericht{
+  align-self:flex-start;
+  padding:8px 12px;
+  border-radius:var(--radius);
+  font-size:.85rem;
+  line-height:1.4;
+  max-width:85%;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+}
+.team-chat__bericht--eigen{
+  align-self:flex-end;
+  background:rgba(193,91,63,.15);
+  border:1px solid var(--ember);
+}
+.team-chat__afzender{
+  font-family:var(--mono);
+  font-size:.66rem;
+  color:var(--text-dim);
+  letter-spacing:.03em;
+  margin-bottom:3px;
+  text-transform:uppercase;
+}
+.team-chat__tekst{ color:var(--text); white-space:pre-wrap; word-break:break-word; }
+
+/* ============================================================
+   RESTAURANTNAAM WIJZIGEN
+   ============================================================ */
+.naam-wijzig-form{ display:flex; gap:10px; max-width:420px; }
+.naam-wijzig-form input{
+  flex:1;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:10px 12px;
+  font-size:.95rem;
+}
+
+/* ============================================================
+   ACHTERGROND / THEMA
+   ============================================================ */
+.thema-swatches{
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-bottom:22px;
+}
+.thema-swatch{
+  width:92px;
+  height:70px;
+  border-radius:var(--radius);
+  border:2px solid var(--line);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  font-size:1.1rem;
+  gap:4px;
+  transition:transform .12s ease, border-color .12s ease;
+}
+.thema-swatch span{
+  font-family:var(--ui);
+  font-style:normal;
+  font-weight:600;
+  font-size:.65rem;
+  letter-spacing:.02em;
+}
+.thema-swatch:hover{ transform:translateY(-2px); }
+.thema-swatch.actief{ border-color:var(--flame); }
+
+.thema-eigen{ display:flex; flex-wrap:wrap; gap:26px; }
+.thema-eigen__rij{ display:flex; flex-direction:column; gap:8px; }
+.thema-eigen__rij label{
+  font-family:var(--mono);
+  font-size:.72rem;
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  color:var(--text-dim);
+}
+.thema-eigen__rij input[type="color"]{
+  width:64px; height:38px;
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--bg-2);
+  padding:2px;
+}
+
+.regenboog-rij{ display:flex; flex-wrap:wrap; gap:10px; }
+.regenboog-swatch{
+  width:40px; height:40px;
+  border-radius:50%;
+  border:2px solid var(--line);
+  transition:transform .12s ease, border-color .12s ease;
+}
+.regenboog-swatch:hover{ transform:translateY(-2px) scale(1.06); }
+.regenboog-swatch.actief{ border-color:var(--flame); box-shadow:0 0 0 2px var(--flame-dark); }
+
+.patroon-rij{ display:flex; flex-wrap:wrap; gap:10px; }
+.patroon-swatch{
+  display:flex; flex-direction:column; align-items:center; gap:4px;
+  width:84px; padding:12px 8px;
+  background:var(--bg-2);
+  border:2px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-family:var(--ui);
+  font-size:.72rem;
+  transition:transform .12s ease, border-color .12s ease;
+}
+.patroon-swatch:hover{ transform:translateY(-2px); }
+.patroon-swatch.actief{ border-color:var(--flame); }
+.patroon-swatch__emoji{ font-size:1.5rem; line-height:1; }
+
+.lettertype-rij{ display:flex; flex-wrap:wrap; gap:10px; }
+.lettertype-swatch{
+  padding:12px 18px;
+  background:var(--bg-2);
+  border:2px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-size:1rem;
+  transition:transform .12s ease, border-color .12s ease;
+}
+.lettertype-swatch:hover{ transform:translateY(-2px); }
+.lettertype-swatch.actief{ border-color:var(--flame); }
+
+.vorm-rij{ display:flex; flex-wrap:wrap; gap:10px; }
+.vorm-swatch{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:8px;
+  padding:12px 18px;
+  background:var(--bg-2);
+  border:2px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text);
+  font-family:var(--ui);
+  font-size:.78rem;
+  transition:transform .12s ease, border-color .12s ease;
+}
+.vorm-swatch:hover{ transform:translateY(-2px); }
+.vorm-swatch.actief{ border-color:var(--flame); }
+.vorm-swatch__voorbeeld{
+  width:44px;
+  height:22px;
+  background:var(--panel-2);
+  border:2px solid var(--text-dim);
+  display:block;
+}
+
+.geluid-rij{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.geluid-optie{
+  display:flex; align-items:stretch;
+  background:var(--bg-2);
+  border:2px solid var(--line);
+  border-radius:var(--radius);
+  overflow:hidden;
+  transition:transform .12s ease, border-color .12s ease;
+}
+.geluid-optie:hover{ transform:translateY(-2px); }
+.geluid-optie.actief{ border-color:var(--flame); }
+.geluid-optie__kies{
+  background:transparent;
+  border:none;
+  padding:12px 18px;
+  color:var(--text);
+  font-family:var(--ui);
+  font-size:.8rem;
+  white-space:nowrap;
+}
+.geluid-optie__preview, .geluid-optie__verwijder{
+  background:transparent;
+  border:none;
+  border-left:1px solid var(--line);
+  padding:12px 14px;
+  color:var(--text-dim);
+  font-size:.8rem;
+}
+.geluid-optie__preview:hover{ color:var(--flame); }
+.geluid-optie__verwijder:hover{ color:var(--ember); }
+.geluid-upload{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.geluid-duur-rij{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:14px; font-size:.82rem; color:var(--text-dim); }
+.geluid-duur-rij label{ color:var(--text); font-weight:600; }
+.geluid-duur-rij input{
+  width:90px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:var(--radius);
+  padding:7px 9px;
+  font-size:.88rem;
+}
+
+/* ============================================================
+   PLATTEGROND
+   ============================================================ */
+.plattegrond-tools{ display:flex; gap:8px; flex-wrap:wrap; }
+.plattegrond-wrap{ overflow-x:auto; padding-bottom:6px; }
+.plattegrond-grid{
+  display:grid;
+  gap:5px;
+  width:max-content;
+}
+.plattegrond__cel{
+  width:38px; height:38px;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:4px;
+  font-size:1.05rem;
+  line-height:1;
+  color:var(--text);
+  display:flex; align-items:center; justify-content:center;
+}
+.plattegrond__cel:not(:disabled):hover{ border-color:var(--flame); }
+.plattegrond__cel--tafel{ background:var(--panel-2); border-color:var(--flame-dark); position:relative; }
+.plattegrond__cel--stoel{
+  background:var(--panel-2);
+  border-color:var(--wood);
+  border-radius:4px;
+  box-shadow:inset 0 0 0 1px rgba(169,113,60,.3), 0 2px 6px rgba(0,0,0,.22);
+  transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.plattegrond__cel--stoel:not(:disabled):hover{
+  border-color:var(--wood-light);
+  transform:scale(1.12);
+  box-shadow:inset 0 0 0 1px rgba(169,113,60,.55), 0 6px 16px rgba(169,113,60,.4);
+}
+.plattegrond__cel:disabled{ cursor:default; opacity:.9; }
+.plattegrond__cel--leeg{ background:transparent; border:1px dashed var(--line); opacity:.35; }
+.plattegrond__cel--vrij{ border-color:var(--fresh); }
+.plattegrond__cel--vrij:hover{ border-color:var(--fresh); background:#233420; }
+.plattegrond__cel--bezet{ border-color:var(--ember); background:#3a1c16; }
+.plattegrond__cel--bezet:hover{ border-color:var(--ember); }
+.plattegrond__nr{
+  position:absolute;
+  bottom:-2px; right:-2px;
+  font-family:var(--mono);
+  font-size:.55rem;
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  border-radius:3px;
+  padding:0 3px;
+  line-height:1.3;
+}
+
+.plattegrond-uitleg{ color:var(--text-dim); font-size:.85rem; margin-top:-8px; }
+/* Houten stoeltje van bovenaf (net als een echt plattegrond-symbool: een vierkante zit met een
+   rond "kapje" als rugleuning) i.p.v. het 🪑-emoji: een emoji staat er op zijn kop uit zodra je
+   'm 180° draait, dit vormpje niet — het kapje laat gewoon zien waar de stoel naartoe kijkt, in
+   elke rotatiestand. Geen pootjes: die zie je bij een bovenaanzicht sowieso niet. */
+.plattegrond__stoel-icoon{
+  position:relative;
+  display:inline-block;
+  width:21px; height:23px;
+  transition:transform .15s ease;
+}
+.plattegrond__stoel-icoon__zit{
+  position:absolute;
+  left:0; right:0; bottom:0;
+  height:16px;
+  border-radius:3px;
+  background:
+    repeating-linear-gradient(100deg, rgba(0,0,0,.08) 0 1.5px, transparent 1.5px 4px),
+    linear-gradient(165deg, var(--wood-light) 0%, var(--wood) 55%, var(--wood-dark) 100%);
+  box-shadow:
+    0 2px 3px rgba(0,0,0,.35),
+    inset 0 1px 1px rgba(255,220,180,.4),
+    inset 0 -2px 3px rgba(0,0,0,.3);
+}
+.plattegrond__stoel-icoon__rug{
+  position:absolute;
+  left:2px; right:2px; top:0;
+  height:9px;
+  border-radius:6px 6px 2px 2px;
+  background:
+    repeating-linear-gradient(90deg, var(--wood-dark) 0 1.5px, var(--wood) 1.5px 4px, var(--wood-light) 4px 4.5px);
+  box-shadow:
+    0 1px 2px rgba(0,0,0,.3),
+    inset 0 1px 1px rgba(255,220,180,.3);
+}
+.plattegrond-legenda{
+  display:flex; gap:18px;
+  font-family:var(--mono);
+  font-size:.75rem;
+  color:var(--text-dim);
+  margin-bottom:14px;
+}
+.plattegrond-legenda span{ display:inline-flex; align-items:center; gap:6px; }
+.legenda-stip{
+  display:inline-block; width:10px; height:10px; border-radius:50%;
+}
+.legenda-stip--vrij{ background:var(--fresh); }
+.legenda-stip--bezet{ background:var(--ember); }
+
+.wagen__tafel-label{
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  font-family:var(--display);
+  font-style:italic;
+  font-weight:700;
+  font-size:1.05rem;
+  padding:10px 0;
+}
+.tafel-status{
+  font-family:var(--mono);
+  font-style:normal;
+  font-size:.62rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  padding:2px 7px;
+  border-radius:3px;
+}
+.tafel-status--bezet{ background:var(--ember); color:#1a0f08; }
+.tafel-status--vrij{ background:var(--fresh); color:#0c1f10; }
+
+.historie-tabel{
+  width:100%;
+  border-collapse:collapse;
+  font-size:.88rem;
+}
+.historie-tabel th{
+  text-align:left;
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  font-size:.68rem;
+  color:var(--flame);
+  padding:8px 10px;
+  border-bottom:1px solid var(--line);
+}
+.historie-tabel td{
+  padding:9px 10px;
+  border-bottom:1px solid var(--line);
+}
+.historie-tabel tr:last-child td{ border-bottom:none; }
+
+.nieuws-teaser{
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  background:var(--panel);
+  padding:14px 18px;
+  width:min(420px, 90vw);
+  text-align:left;
+}
+.nieuws-teaser__titel{
+  font-family:var(--mono);
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  font-size:.68rem;
+  color:var(--flame);
+  margin-bottom:8px;
+}
+.nieuws-teaser__regel{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:10px;
+  font-size:.85rem;
+  color:var(--text-dim);
+  padding:4px 0;
+}
+.nieuws-teaser__gelezen{
+  flex-shrink:0;
+  background:none;
+  border:none;
+  color:var(--text-dim);
+  font-family:var(--mono);
+  font-size:.66rem;
+  text-transform:uppercase;
+  letter-spacing:.06em;
+  text-decoration:underline;
+  text-underline-offset:3px;
+  padding:0;
+}
+.nieuws-teaser__gelezen:hover{ color:var(--flame); }
+
+.landing__mijn-restaurants{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  align-items:center;
+}
+.landing__restaurant-groep{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  align-items:center;
+  margin-bottom:6px;
+}
+.landing__restaurant-groep__titel{
+  font-family:var(--mono);
+  font-size:.7rem;
+  text-transform:uppercase;
+  letter-spacing:.08em;
+  color:var(--text-dim);
+}
+.landing__limiet{
+  color:var(--text-dim);
+  font-size:.85rem;
+  max-width:420px;
+  margin:0;
+  line-height:1.5;
+}
+
+.product-card__emoji{
+  width:42px; height:42px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:1.45rem;
+  line-height:1;
+  margin-bottom:10px;
+  border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, rgba(200,121,60,.3), rgba(200,121,60,.05) 72%);
+  box-shadow:inset 0 0 0 1px rgba(200,121,60,.28);
+  transition:transform .18s ease;
+}
+.product-card:hover .product-card__emoji{ transform:scale(1.08) rotate(-4deg); }
+
+.menu-lijst{ list-style:none; margin:0; padding:0; }
+.menu-lijst li{
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 0;
+  border-bottom:1px solid var(--line);
+  font-size:.9rem;
+}
+.menu-lijst li:last-child{ border-bottom:none; }
+.menu-lijst .cat{
+  font-family:var(--mono);
+  font-size:.68rem;
+  text-transform:uppercase;
+  color:var(--text-dim);
+  margin-left:8px;
+}
+.verwijder-x{
+  background:none; border:none; color:var(--ink-dim);
+  color:var(--text-dim);
+  font-size:1rem; padding:2px 8px;
+}
+.verwijder-x:hover{ color:var(--ember); }
+
+.toast{
+  position:fixed;
+  bottom:20px; left:50%; transform:translateX(-50%);
+  background:var(--panel-2);
+  border:1px solid var(--flame);
+  color:var(--text);
+  padding:10px 18px;
+  border-radius:var(--radius);
+  font-family:var(--mono);
+  font-size:.82rem;
+  z-index:50;
+  animation:toast-in .2s ease;
+}
+@keyframes toast-in{ from{opacity:0; transform:translate(-50%,8px);} to{opacity:1; transform:translate(-50%,0);} }
+
+/* ============================================================
+   ZELFBESTELLEN — QR-code (Instellingen) + print + gast-tracker
+   ============================================================ */
+.qr-vak{
+  display:flex;
+  justify-content:center;
+  padding:18px;
+  background:var(--paper);
+  border-radius:var(--radius);
+  margin:10px 0;
+}
+.qr-vak img{ display:block; border-radius:2px; }
+.qr-link-tonen{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.qr-link-tonen input{ flex:1; min-width:160px;
+  padding:8px 10px;
+  background:var(--panel-2);
+  border:1px solid var(--line);
+  border-radius:var(--radius);
+  color:var(--text-dim);
+  font-family:var(--mono);
+  font-size:.78rem;
+}
+
+/* Print-only vak: normaal onzichtbaar, alleen zichtbaar in het printvenster (zie qrPrinten() in app.js) */
+#print-qr-vak{ display:none; }
+@media print{
+  body > *:not(#print-qr-vak){ display:none !important; }
+  #print-qr-vak{
+    display:flex !important;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    gap:14px;
+    width:100%;
+    padding:60px 0;
+    background:#fff;
+    color:#111;
   }
-  db.ref("gebruikers/" + state.apparaatId).update(payload);
+  #print-qr-vak .print-qr__naam{ font-family:var(--display); font-size:2rem; font-weight:700; }
+  #print-qr-vak img{ width:260px; height:260px; }
+  #print-qr-vak .print-qr__uitleg{ font-size:1.1rem; }
+  #print-qr-vak .print-qr__code{ font-family:var(--mono); font-size:.9rem; color:#555; }
+}
+
+/* Statustracker op de zelfbestel-pagina (bestellen.html) */
+.gast-tracker__rij{ padding:10px 0; border-bottom:1px solid var(--line); }
+.gast-tracker__rij:last-child{ border-bottom:none; }
+.gast-tracker__top{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.gast-tracker__nr{ font-family:var(--mono); color:var(--text-dim); font-size:.8rem; }
+.gast-tracker__items{ margin-top:4px; color:var(--text-dim); font-size:.85rem; }
+.gast-tracker__wachtrij{ margin-top:6px; font-size:.8rem; color:var(--flame); font-weight:600; }
+.gast-status{ padding:4px 10px; border-radius:20px; font-size:.76rem; font-weight:600; white-space:nowrap; }
+.gast-status--nieuw{ background:rgba(200,121,60,.18); color:var(--flame); }
+.gast-status--bereiden{ background:rgba(138,155,170,.18); color:var(--steel-blue); }
+.gast-status--klaar{ background:rgba(111,148,99,.18); color:var(--fresh); }
+
+/* ============================================================
+   TELEFOON-WEERGAVE
+   Extra aanpassingen zodat de site prettig te gebruiken is op een
+   smartphone-scherm (naast de bestaande breakpoints hierboven).
+   ============================================================ */
+@media (max-width:600px){
+  .topbar{ padding:12px 14px; gap:10px; }
+  .topbar__naam{ font-size:1.05rem; }
+  .topbar__id{ flex-wrap:wrap; row-gap:6px; }
+  .tabs{ padding:8px 10px; gap:4px; }
+  .tab{ padding:9px 12px; font-size:.66rem; }
+  .view{ padding:14px; }
+  .view-titel{ font-size:1.35rem; }
+  .subtabs{ overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap; }
+
+  .instel-blok{ padding:15px; }
+  .naam-wijzig-form{ flex-direction:column; max-width:none; }
+  .naam-wijzig-form .btn{ width:100%; }
+  .code-tonen{ flex-direction:column; align-items:stretch; }
+  .code-tonen__code{ text-align:center; font-size:1.3rem; }
+  .qr-vak img{ width:100%; height:auto; max-width:220px; margin:0 auto; display:block; }
+  .qr-link-tonen{ flex-direction:column; align-items:stretch; }
+  .qr-link-tonen input{ width:100%; }
+
+  .menu-form{ grid-template-columns:1fr; }
+  .menu-form .btn{ width:100%; }
+  .categorie-form{ max-width:none; flex-direction:column; }
+  .categorie-form .btn{ width:100%; }
+
+  .product-grid{ grid-template-columns:repeat(auto-fill, minmax(130px,1fr)); gap:10px; }
+  .bestel-layout{ gap:16px; }
+
+  .beheer-rest-rij__acties{ flex-wrap:wrap; }
+  .update-form__row{ flex-direction:column; align-items:stretch; }
+  .update-form__row .btn{ width:100%; }
+}
+
+@media (max-width:400px){
+  .landing__title{ font-size:clamp(2.4rem, 13vw, 3.4rem); }
+  .choice-card{ width:100% !important; }
+  .product-grid{ grid-template-columns:repeat(auto-fill, minmax(110px,1fr)); }
 }
-
-// ---------- account (echt account via Firebase Authentication) ----------
-// Los van sitebeheer (zie verderop): dit is een gewoon account waarmee een bezoeker zelf
-// restaurants kan máken — joinen met een code kan altijd, ook zonder account. Gebruikt
-// dezelfde Firebase Authentication als sitebeheer, maar is daar strikt los van: of iemand
-// sitebeheerder is, wordt bepaald door een aparte "beheerders/<uid>"-lijst in de database
-// (zie onAuthStateChanged onderaan), niet door simpelweg ingelogd te zijn.
-const MAX_LETTERS_ACCOUNT_NAAM = 20;
-let accountRestaurantenRef = null; // firebase-ref met de live-listener op je eigen account-restaurantlijst
-function accountPaneelOpenen(){
-  state.accountPaneelOpen = true;
-  state.accountFoutmelding = "";
-  render();
-}
-function accountPaneelSluiten(){
-  state.accountPaneelOpen = false;
-  state.accountFoutmelding = "";
-  render();
-}
-function accountModusWisselen(modus){
-  state.accountModus = modus;
-  state.accountFoutmelding = "";
-  render();
-}
-function accountRegistreren(username, email, wachtwoord){
-  username = (username || "").trim();
-  email = (email || "").trim();
-  wachtwoord = wachtwoord || "";
-  if(!username){ state.accountFoutmelding = "Vul een gebruikersnaam in."; render(); return; }
-  if(username.length > MAX_LETTERS_ACCOUNT_NAAM){ state.accountFoutmelding = `Maximaal ${MAX_LETTERS_ACCOUNT_NAAM} letters.`; render(); return; }
-  if(!email || !wachtwoord){ state.accountFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
-  if(wachtwoord.length < 6){ state.accountFoutmelding = "Een wachtwoord moet minstens 6 tekens bevatten."; render(); return; }
-  state.accountFoutmelding = "Bezig met account maken…";
-  render();
-  auth.createUserWithEmailAndPassword(email, wachtwoord)
-    .then(cred => db.ref("accounts/" + cred.user.uid).set({
-      username,
-      email,
-      aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-    }))
-    .then(() => {
-      state.accountPaneelOpen = false;
-      state.accountFoutmelding = "";
-      render();
-      // De rest (state.account vullen, restaurantlijst ophalen) gebeurt via onAuthStateChanged.
-    })
-    .catch(err => {
-      state.accountFoutmelding = err.code === "auth/email-already-in-use" ? "Dit e-mailadres is al in gebruik."
-        : err.code === "auth/invalid-email" ? "Dit e-mailadres is ongeldig."
-        : "Account maken is niet gelukt. Probeer het opnieuw.";
-      render();
-    });
-}
-function accountInloggen(email, wachtwoord){
-  email = (email || "").trim();
-  wachtwoord = wachtwoord || "";
-  if(!email || !wachtwoord){ state.accountFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
-  state.accountFoutmelding = "Bezig met inloggen…";
-  render();
-  auth.signInWithEmailAndPassword(email, wachtwoord)
-    .then(() => {
-      state.accountPaneelOpen = false;
-      state.accountFoutmelding = "";
-      render();
-    })
-    .catch(() => {
-      state.accountFoutmelding = "Onjuiste inloggegevens.";
-      render();
-    });
-}
-function accountUitloggen(){
-  auth.signOut();
-}
-function accountNaamBewerkenTogglen(){
-  state.accountNaamBewerken = !state.accountNaamBewerken;
-  state.accountNaamFout = "";
-  render();
-}
-// Klap het potlood (naam wijzigen) open/dicht — verschijnt pas nadat je op je naam
-// in de topbar hebt geklikt, in plaats van altijd zichtbaar te staan naast Uitloggen.
-function accountNaamMenuTogglen(){
-  state.accountNaamMenuOpen = !state.accountNaamMenuOpen;
-  render();
-}
-function accountNaamOpslaan(nieuweNaam){
-  nieuweNaam = (nieuweNaam || "").trim();
-  if(!state.account) return;
-  if(!nieuweNaam){ state.accountNaamFout = "Vul een naam in."; render(); return; }
-  if(nieuweNaam.length > MAX_LETTERS_ACCOUNT_NAAM){ state.accountNaamFout = `Maximaal ${MAX_LETTERS_ACCOUNT_NAAM} letters.`; render(); return; }
-  db.ref("accounts/" + state.account.uid + "/username").set(nieuweNaam).then(() => {
-    state.account = { ...state.account, username: nieuweNaam };
-    state.accountNaamBewerken = false;
-    state.accountNaamFout = "";
-    render();
-  });
-}
-// Houdt de restaurants die je account gemaakt heeft live bij (op elk apparaat waar je inlogt),
-// en voegt ze toe aan "mijn restaurants" van dít apparaat als ze hier nog niet bekend zijn —
-// zo zie je na inloggen op een nieuw apparaat je gemaakte restaurants gewoon weer terug.
-function accountRestaurantenLuisteren(uid){
-  accountRestaurantenListenerStoppen();
-  accountRestaurantenRef = db.ref("accounts/" + uid + "/restaurants");
-  accountRestaurantenRef.on("value", snap => {
-    const data = snap.val() || {};
-    let gewijzigd = false;
-    Object.entries(data).forEach(([code, info]) => {
-      if(state.mijnRestaurants.some(r => r.code === code)) return; // al lokaal bekend op dit apparaat
-      state.mijnRestaurants.push({
-        code,
-        naam: (info && info.naam) || code,
-        ledId: (info && info.ledId) || null,
-        gebruikersNaam: state.siteGebruikersNaam || "",
-        type: "gemaakt",
-      });
-      gewijzigd = true;
-    });
-    if(gewijzigd){
-      localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-      mijnRestaurantsEigenaarSyncStarten();
-    }
-    render();
-  });
-}
-function accountRestaurantenListenerStoppen(){
-  if(accountRestaurantenRef){ accountRestaurantenRef.off(); accountRestaurantenRef = null; }
-}
-
-const MAX_LETTERS_RESTAURANTNAAM = 10;   // standaardlimiet aantal tekens voor een restaurantnaam, tenzij sitebeheer voor dit restaurant een eigen limiet heeft ingesteld
-// De limiet die nu voor dít restaurant geldt: de eigen limiet van sitebeheer (state.naamLimiet)
-// als die gezet is, anders gewoon de standaardlimiet.
-function effectieveNaamLimiet(){
-  return (typeof state.naamLimiet === "number" && state.naamLimiet > 0) ? state.naamLimiet : MAX_LETTERS_RESTAURANTNAAM;
-}
-function restaurantNaamWijzigen(nieuweNaam){
-  nieuweNaam = (nieuweNaam || "").trim();
-  if(!nieuweNaam) return;
-  const limiet = effectieveNaamLimiet();
-  if(nieuweNaam.length > limiet){
-    toonToast(`Een restaurantnaam mag maximaal ${limiet} letters bevatten.`);
-    return;
-  }
-  db.ref("restaurants/" + state.restaurantCode + "/naam").set(nieuweNaam).then(() => {
-    toonToast("Restaurantnaam bijgewerkt");
-  });
-}
-// Genereert een subtiel herhalend achtergrondpatroon (SVG data-URI) op basis van een emoji.
-function patroonAchtergrondUrl(patroonKey){
-  const optie = PATROON_OPTIES.find(p => p.key === patroonKey);
-  if(!optie || !optie.emoji) return "";
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>` +
-    `<text x='12' y='48' font-size='42' opacity='0.22'>${optie.emoji}</text>` +
-    `<text x='82' y='118' font-size='42' opacity='0.22'>${optie.emoji}</text>` +
-    `</svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
-}
-// Berekent of witte of donkere tekst het beste leesbaar is op een gegeven achtergrondkleur.
-function contrastKleur(hex){
-  hex = (hex || "").replace("#", "");
-  if(hex.length === 3) hex = hex.split("").map(c => c + c).join("");
-  if(hex.length !== 6) return "#f3ead9";
-  const r = parseInt(hex.substr(0,2),16), g = parseInt(hex.substr(2,2),16), b = parseInt(hex.substr(4,2),16);
-  const yiq = (r*299 + g*587 + b*114) / 1000;
-  return yiq >= 140 ? "#241a12" : "#f3ead9";
-}
-// Past de gekozen achtergrond, tekstkleur, patroon en lettertype van dit restaurant toe op de pagina.
-function toepassenThema(thema){
-  document.body.style.backgroundColor = thema && thema.achtergrond ? thema.achtergrond : "";
-  document.body.style.backgroundImage = thema && thema.patroon ? patroonAchtergrondUrl(thema.patroon) : "";
-  if(thema && thema.tekst){
-    document.documentElement.style.setProperty("--text", thema.tekst);
-  } else {
-    document.documentElement.style.removeProperty("--text");
-  }
-  const lettertype = thema && thema.lettertype ? LETTERTYPE_OPTIES.find(f => f.key === thema.lettertype) : null;
-  if(lettertype && lettertype.key !== "standaard"){
-    document.documentElement.style.setProperty("--ui", lettertype.ui);
-    document.documentElement.style.setProperty("--display", lettertype.css);
-  } else {
-    document.documentElement.style.removeProperty("--ui");
-    document.documentElement.style.removeProperty("--display");
-  }
-  const vorm = thema && thema.vorm ? VORM_OPTIES.find(v => v.key === thema.vorm) : null;
-  if(vorm && vorm.key !== "standaard"){
-    document.documentElement.style.setProperty("--radius", vorm.radius);
-  } else {
-    document.documentElement.style.removeProperty("--radius");
-  }
-}
-function themaWijzigen(veld, waarde){
-  db.ref("restaurants/" + state.restaurantCode + "/thema/" + veld).set(waarde);
-}
-function themaPresetKiezen(achtergrond, tekst){
-  db.ref("restaurants/" + state.restaurantCode + "/thema").update({ achtergrond, tekst });
-}
-// Kortste toegestane lengte voor het (ingekorte) meldinggeluid — hieronder mag niet.
-const GELUID_MIN_DUUR = 4;
-// Speelt een geluidsbestand (of data-URI van een eigen upload) gewoon meteen af, voor
-// zowel de voorbeeld-knop bij het kiezen als de echte melding bij een nieuwe bestelling.
-// duurSeconden (optioneel): speelt maximaal dit aantal seconden af en stopt dan vanzelf,
-// zodat een lang geluidsbestand toch als kort meldinggeluid gebruikt kan worden.
-function geluidAfspelen(url, duurSeconden){
-  if(!url) return;
-  try {
-    const audio = new Audio(url);
-    audio.play().catch(() => {});
-    if(duurSeconden && duurSeconden > 0){
-      setTimeout(() => {
-        try { audio.pause(); } catch(e) {}
-      }, duurSeconden * 1000);
-    }
-  } catch(e) {}
-}
-function themaGeluidKiezen(key){
-  themaWijzigen("geluid", key);
-}
-// Per tabblad (Bestellen/Keuken/Bezorgen/Historie/Voorraad) aan of uit — meerdere tegelijk aan
-// mag. Wordt per apparaat/tabblad losstaand gecheckt in speelMeldingsGeluidAf hieronder: het
-// geluid gaat alleen af op het apparaat dat op dát moment op zo'n aangevinkt tabblad staat.
-// Bouwt ALTIJD een compleet object met alle tabbladen erin (aangevuld met de standaardwaarden
-// hieronder voor wat nog nooit expliciet is opgeslagen) — anders zou het aanvinken van bijv.
-// "Bezorgen" in de database een object aanmaken dat ALLEEN "bezorgen" bevat, waardoor "Keuken"
-// (dat impliciet aanstond via de standaardwaarde) stilletjes uit zou gaan. Dat was de bug.
-function geluidViewsMetDefaults(opgeslagen){
-  const resultaat = {};
-  MELDING_VIEWS_DEFINITIES.forEach(v => {
-    const standaard = v.key === "keuken"; // standaard staat alleen Keuken aan
-    resultaat[v.key] = (opgeslagen && opgeslagen[v.key] !== undefined) ? !!opgeslagen[v.key] : standaard;
-  });
-  return resultaat;
-}
-function themaGeluidViewToggle(viewKey){
-  const huidigeViews = geluidViewsMetDefaults(state.thema && state.thema.geluidViews);
-  db.ref("restaurants/" + state.restaurantCode + "/thema/geluidViews/" + viewKey).set(!huidigeViews[viewKey]);
-}
-// Leest een door de gebruiker gekozen bestand in en slaat 'm als data-URI op in het thema
-// van dit restaurant (er is geen Firebase Storage nodig, dit gaat gewoon via de database net
-// als de rest van het thema) — geldt daardoor automatisch voor alle apparaten van dit restaurant.
-function themaEigenGeluidUploaden(file){
-  if(!file) return;
-  if(!file.type.startsWith("audio/")){
-    toonToast("Kies een geluidsbestand (mp3, wav, ogg, ...)");
-    return;
-  }
-  if(file.size > GELUID_MAX_BYTES){
-    toonToast("Bestand te groot — kies een geluidje onder de " + Math.round(GELUID_MAX_BYTES/1024) + " KB");
-    return;
-  }
-  const reader = new FileReader();
-  reader.onload = () => {
-    db.ref("restaurants/" + state.restaurantCode + "/thema").update({
-      geluid: "eigen",
-      geluidEigenData: reader.result,
-      geluidEigenNaam: file.name,
-    }).then(() => toonToast("Eigen geluid geüpload"));
-  };
-  reader.onerror = () => toonToast("Kon het bestand niet lezen");
-  reader.readAsDataURL(file);
-}
-function themaEigenGeluidVerwijderen(){
-  db.ref("restaurants/" + state.restaurantCode + "/thema").update({
-    geluid: "geen",
-    geluidEigenData: null,
-    geluidEigenNaam: null,
-  });
-}
-// Bepaalt welk geluid nu actief staat voor dit restaurant en speelt het af — maar alléén op dít
-// apparaat, en alléén als dit apparaat op dít moment op een tabblad staat dat hierboven is
-// aangevinkt (zie themaGeluidViewToggle). Staat er niets aangevinkt (nog niet ingesteld), dan
-// geldt Keuken als standaard, zoals voorheen.
-// "events" zegt WELKE gebeurtenis(sen) er zijn geweest ({nieuw, klaar}) — Keuken hoort alleen
-// te rinkelen bij een NIEUWE bestelling, Bezorgen alleen bij een bestelling die KLAAR is om te
-// bezorgen, niet door elkaar. De overige tabbladen (Bestellen/Historie/Voorraad) maken dat
-// onderscheid niet en reageren gewoon op beide soorten meldingen.
-function speelMeldingsGeluidAf(events){
-  const viewsAan = geluidViewsMetDefaults(state.thema && state.thema.geluidViews);
-  if(!viewsAan[state.huidigeView]) return;
-  if(state.huidigeView === "keuken" && !events.nieuw) return;
-  if(state.huidigeView === "bezorgen" && !events.klaar) return;
-  const thema = state.thema || {};
-  if(thema.geluid === "eigen" && thema.geluidEigenData){
-    geluidAfspelen(thema.geluidEigenData, thema.geluidDuur);
-  }
-}
-// Slaat op na hoeveel seconden het eigen meldinggeluid moet stoppen (ingekort), met een
-// minimum van GELUID_MIN_DUUR seconden. Leeg/0 = niet ingekort, speelt gewoon helemaal af.
-function themaGeluidDuurWijzigen(waarde){
-  let duur = parseInt(waarde, 10);
-  if(!duur || isNaN(duur)){
-    themaWijzigen("geluidDuur", null);
-    return;
-  }
-  if(duur < GELUID_MIN_DUUR) duur = GELUID_MIN_DUUR;
-  themaWijzigen("geluidDuur", duur);
-}
-// Sluit de live-verbindingen met het huidige restaurant af en gaat terug naar het startscherm.
-// Haalt zelf niets uit "mijn restaurants" — dat doet de aanroeper vooraf, als dat gewenst is
-// (zie de "terug-naar-start"-actie, restaurantVerwijderenDoorEigenaar en restaurantVerlatenAlsLid).
-function verlaatHuidigRestaurant(){
-  const code = state.restaurantCode;
-  if(code){
-    db.ref("restaurants/" + code + "/naam").off();
-    db.ref("restaurants/" + code + "/naamLimiet").off();
-    db.ref("restaurants/" + code + "/menu").off();
-    db.ref("restaurants/" + code + "/bestellingen").off();
-    db.ref("restaurants/" + code + "/historie").off();
-    db.ref("restaurants/" + code + "/leden").off();
-    db.ref("restaurants/" + code + "/thema").off();
-    db.ref("restaurants/" + code + "/waarschuwing").off();
-    db.ref("restaurants/" + code + "/plattegrond").off();
-    db.ref("restaurants/" + code + "/categorieen").off();
-    db.ref("restaurants/" + code + "/chat").off();
-  }
-  state.restaurantCode = null;
-  state.restaurantNaam = null;
-  state.naamLimiet = null;
-  state.ledId = null;
-  state.gebruikersNaam = null;
-  state.leden = {};
-  state.ledenGeladen = false;
-  state.chat = {};
-  state.thema = null;
-  state.waarschuwing = null;
-  state.plattegrond = {};
-  state.categorieen = {};
-  bekendeBestellingStatussen = null;
-  toepassenThema(null);
-  state.actiefInRestaurant = false;
-  state.landingScherm = "start";
-  state.winkelwagen = {};
-  state.bestelModus = "plattegrond";
-  // Zorgt dat de live eigenaar-listeners (zie mijnRestaurantsEigenaarSyncStarten) actief zijn
-  // voor alle restaurants in je lijst — normaal gesproken lopen deze al vanaf het opstarten,
-  // dit is puur een extra vangnet.
-  mijnRestaurantsEigenaarSyncStarten();
-  state.actieveTafelCel = null;
-  render();
-}
-// Eigenaar: verwijdert het hele restaurant meteen (alle menu, bestellingen en historie) —
-// kan voortaan ook door de eigenaar zelf, niet meer alleen via sitebeheer. Onomkeerbaar.
-function restaurantVerwijderenDoorEigenaar(){
-  if(!state.restaurantCode || state.beheerBezoekModus) return;
-  const eigenLid = state.leden[state.ledId];
-  if(!eigenLid || !eigenLid.eigenaar) return;
-  if(!confirm(`Restaurant "${state.restaurantNaam}" volledig verwijderen? Dit verwijdert al het menu, alle bestellingen en de hele historie, en kan niet ongedaan gemaakt worden.`)) return;
-  const code = state.restaurantCode;
-  // Eerst "naam" én "leden" loskoppelen, zodat de meldingen hieronder (in startRestaurant)
-  // niet per ongeluk nog afgaan ("restaurant bestaat niet meer" / "door eigenaar verwijderd")
-  // tijdens het opruimen van je eigen, zelf gekozen verwijderactie.
-  db.ref("restaurants/" + code + "/naam").off();
-  db.ref("restaurants/" + code + "/leden").off();
-  db.ref("restaurants/" + code).remove();
-  toonToast("Restaurant verwijderd");
-  mijnRestaurantVerwijderenUitLijst(code);
-  verlaatHuidigRestaurant();
-}
-// Teamlid (niet-eigenaar): verlaat dit restaurant zelf, meteen — verwijdert je eigen teamlid-
-// account en haalt het restaurant meteen uit je lijst op dit apparaat. Om weer mee te doen
-// heb je daarna een nieuwe join-code van de eigenaar nodig.
-function restaurantVerlatenAlsLid(){
-  if(!state.restaurantCode || !state.ledId || state.beheerBezoekModus) return;
-  const eigenLid = state.leden[state.ledId];
-  if(eigenLid && eigenLid.eigenaar) return; // de eigenaar kan niet "verlaten", alleen verwijderen
-  if(!confirm("Dit restaurant verlaten? Je hebt daarna een nieuwe code van de eigenaar nodig om er weer bij te komen.")) return;
-  const code = state.restaurantCode;
-  const ledId = state.ledId;
-  // Eerst de ledenlijst-listener loskoppelen, zodat de melding "je bent verwijderd door de
-  // eigenaar" hieronder niet per ongeluk verschijnt over je eigen, zelf gekozen actie.
-  db.ref("restaurants/" + code + "/leden").off();
-  db.ref("restaurants/" + code + "/leden/" + ledId).remove();
-  mijnRestaurantVerwijderenUitLijst(code);
-  verlaatHuidigRestaurant();
-}
-// Bepaalt of het huidige teamlid een bepaald recht heeft (of alles mag, als eigenaar).
-// Zolang de ledenlijst nog niet is geladen (of je eigen lid nog niet gevonden is,
-// bijv. vlak na het aanmaken van een restaurant) wordt toegang tijdelijk toegestaan.
-function heeftRecht(sleutel){
-  if(!state.ledenGeladen) return true;
-  const lid = state.leden[state.ledId];
-  if(!lid) return true;
-  if(lid.eigenaar) return true;
-  return !!(lid.rechten && lid.rechten[sleutel]);
-}
-function genereerCode(){
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // zonder verwarrende tekens
-  let code = "";
-  for(let i=0;i<5;i++) code += chars[Math.floor(Math.random()*chars.length)];
-  return code;
-}
-function euro(bedrag){
-  return "€ " + Number(bedrag).toFixed(2).replace(".", ",");
-}
-function toonToast(tekst){
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = tekst;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1800);
-}
-// Bouwt de link naar de zelfbestel-pagina voor een restaurant — werkt automatisch op elke
-// plek waar de site gehost staat (GitHub Pages, eigen domein, lokaal), omdat 'ie uitgaat van
-// de locatie van dit bestand zelf.
-function zelfBestelUrl(code){
-  return location.origin + location.pathname.replace(/index\.html$/, "") + "bestellen.html?code=" + code;
-}
-// Genereert de QR-afbeelding via een publieke QR-code-API — een gewone <img>, geen canvas/JS-
-// bibliotheek nodig om te tekenen. Dat voorkomt dat de QR-code stilletjes leeg blijft (bijv. als
-// een CDN-script niet op tijd laadt): een <img> toont gewoon een gebroken-afbeelding-icoontje
-// als het misgaat, in plaats van onzichtbaar te falen.
-function zelfBestelQrAfbeeldingUrl(code){
-  return "https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=" + encodeURIComponent(zelfBestelUrl(code));
-}
-
-// ---------- firebase acties ----------
-function restaurantMaken(naam, eigenNaam){
-  if(!state.account){
-    state.foutmelding = "Log in om een restaurant te maken.";
-    render(); return;
-  }
-  naam = naam.trim();
-  eigenNaam = (eigenNaam || "").trim();
-  const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
-  if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
-    state.foutmelding = `Je hebt het maximum van ${MAX_RESTAURANTS_GEMAAKT} gemaakte restaurants al bereikt.`;
-    render(); return;
-  }
-  if(!naam){ state.foutmelding = "Vul een naam voor je restaurant in."; render(); return; }
-  if(naam.length > MAX_LETTERS_RESTAURANTNAAM){
-    state.foutmelding = `Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.`;
-    render(); return;
-  }
-  if(!eigenNaam){ state.foutmelding = "Vul je eigen naam in."; render(); return; }
-  const code = genereerCode();
-  db.ref("restaurants/" + code).set({
-    naam: naam,
-    aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-    menu: {},
-  }).then(() => {
-    const ledRef = db.ref("restaurants/" + code + "/leden").push();
-    const catRef = db.ref("restaurants/" + code + "/categorieen").push();
-    return Promise.all([
-      ledRef.set({
-        naam: eigenNaam,
-        functie: "Eigenaar",
-        eigenaar: true,
-        rechten: { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true },
-        aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-      }),
-      catRef.set({ naam: "Overig", aangemaakt: firebase.database.ServerValue.TIMESTAMP }),
-    ]).then(() => ledRef.key);
-  }).then(ledId => {
-    mijnRestaurantOpslaan(code, naam, ledId, eigenNaam, "gemaakt");
-    // Koppel het restaurant ook aan je account, zodat je 'm op een ander apparaat na inloggen
-    // gewoon terugziet (zie accountRestaurantenLuisteren hierboven).
-    db.ref("accounts/" + state.account.uid + "/restaurants/" + code).set({ naam, ledId });
-    state.restaurantCode = code;
-    state.restaurantNaam = naam;
-    state.ledId = ledId;
-    state.gebruikersNaam = eigenNaam;
-    startRestaurant();
-  });
-}
-function restaurantJoinen(codeInvoer, eigenNaam){
-  const code = codeInvoer.trim().toUpperCase();
-  eigenNaam = (eigenNaam || "").trim();
-  if(!code){ state.foutmelding = "Vul een code in."; render(); return; }
-  if(!eigenNaam){ state.foutmelding = "Vul je naam in."; render(); return; }
-  const bestaandLid = state.mijnRestaurants.find(r => r.code === code);
-  if(bestaandLid){
-    // Je bent hier op dit apparaat al lid van — gewoon doorgaan i.p.v. opnieuw joinen.
-    state.restaurantCode = bestaandLid.code;
-    state.restaurantNaam = bestaandLid.naam;
-    state.ledId = bestaandLid.ledId;
-    state.gebruikersNaam = bestaandLid.gebruikersNaam;
-    startRestaurant();
-    return;
-  }
-  // Geen limiet op het aantal restaurants waar je bij kunt joinen — alleen het aantal dat je
-  // zelf máákt is beperkt (zie restaurantMaken hierboven).
-  db.ref("restaurants/" + code).once("value").then(snap => {
-    if(!snap.exists()){
-      state.foutmelding = "Geen restaurant gevonden met code " + code + ".";
-      render();
-    } else {
-      const ledRef = db.ref("restaurants/" + code + "/leden").push();
-      ledRef.set({
-        naam: eigenNaam,
-        functie: "",
-        eigenaar: false,
-        rechten: { ...STANDAARD_RECHTEN },
-        aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-      }).then(() => {
-        mijnRestaurantOpslaan(code, snap.val().naam, ledRef.key, eigenNaam, "gejoind");
-        state.restaurantCode = code;
-        state.restaurantNaam = snap.val().naam;
-        state.ledId = ledRef.key;
-        state.gebruikersNaam = eigenNaam;
-        startRestaurant();
-      });
-    }
-  });
-}
-// Onthoudt de laatst bekende status per bestelling-id, om twee soorten meldenswaardige
-// gebeurtenissen te kunnen herkennen: een gloednieuwe bestelling (status "nieuw", nog
-// onbekend id) én een bestaande bestelling die klaar is om te bezorgen (status wordt
-// "klaar"). Zonder dit tweede geval ging het meldinggeluid nooit af op het Bezorgen-tabblad,
-// omdat een bestelling die van "bereiden" naar "klaar" gaat hetzelfde id behoudt (dus geen
-// "nieuw" id is) — dat was de bug. null = nog niet geïnitialiseerd voor deze sessie/dit
-// restaurant, zodat er nooit geluid afgaat bij het simpelweg binnenkomen/laden van bestaande
-// bestellingen.
-let bekendeBestellingStatussen = null;
-function verwerkBestellingenSnapshot(snap){
-  const nieuweData = snap.val() || {};
-  if(bekendeBestellingStatussen !== null){
-    let erIsEenNieuweBestelling = false;
-    let erIsEenKlareBestelling = false;
-    for(const id in nieuweData){
-      const nieuweStatus = nieuweData[id].status;
-      const oudeStatus = bekendeBestellingStatussen[id]; // undefined = dit id bestond nog niet
-      if(oudeStatus === undefined && nieuweStatus === "nieuw") erIsEenNieuweBestelling = true;
-      if(oudeStatus !== undefined && oudeStatus !== "klaar" && nieuweStatus === "klaar") erIsEenKlareBestelling = true;
-    }
-    if(erIsEenNieuweBestelling || erIsEenKlareBestelling){
-      speelMeldingsGeluidAf({ nieuw: erIsEenNieuweBestelling, klaar: erIsEenKlareBestelling });
-    }
-  }
-  bekendeBestellingStatussen = {};
-  for(const id in nieuweData) bekendeBestellingStatussen[id] = nieuweData[id].status;
-  state.bestellingen = nieuweData;
-  render();
-}
-function startRestaurant(){
-  state.foutmelding = "";
-  state.actiefInRestaurant = true;
-  bekendeBestellingStatussen = null;
-  const code = state.restaurantCode;
-  db.ref("restaurants/" + code + "/naam").on("value", snap => {
-    if(snap.exists()){
-      if(snap.val() !== state.restaurantNaam){
-        state.restaurantNaam = snap.val();
-        mijnRestaurantOpslaan(code, snap.val(), state.ledId, state.gebruikersNaam);
-      }
-      render();
-    } else if(state.actiefInRestaurant && !state.beheerBezoekModus){
-      // Restaurant bestaat niet meer (verwijderd via Sitebeheer) — terug naar het startscherm.
-      toonToast("Dit restaurant bestaat niet meer.");
-      mijnRestaurantVerwijderenUitLijst(code);
-      verlaatHuidigRestaurant();
-    }
-  });
-  // Sitebeheer kan per restaurant een eigen letterlimiet voor de restaurantnaam instellen —
-  // zolang die niet gezet is, geldt gewoon de standaardlimiet (MAX_LETTERS_RESTAURANTNAAM).
-  db.ref("restaurants/" + code + "/naamLimiet").on("value", snap => {
-    state.naamLimiet = snap.exists() ? snap.val() : null;
-    render();
-  });
-  db.ref("restaurants/" + code + "/menu").on("value", snap => {
-    state.menu = snap.val() || {};
-    render();
-  });
-  db.ref("restaurants/" + code + "/bestellingen").on("value", verwerkBestellingenSnapshot);
-  db.ref("restaurants/" + code + "/historie").on("value", snap => {
-    state.historie = snap.val() || {};
-    render();
-  });
-  db.ref("restaurants/" + code + "/leden").on("value", snap => {
-    state.leden = snap.val() || {};
-    state.ledenGeladen = true;
-    if(state.ledId && state.actiefInRestaurant && !state.beheerBezoekModus && !state.leden[state.ledId]){
-      // Je bent door de eigenaar als teamlid verwijderd — dat telt als "verwijderd worden",
-      // en maakt dus weer plek vrij in je lijst met restaurants.
-      toonToast("Je bent door de eigenaar uit dit restaurant verwijderd.");
-      mijnRestaurantVerwijderenUitLijst(code);
-      verlaatHuidigRestaurant();
-      return;
-    }
-    // Eigenaar-wissels ("gemaakt" vs "gejoind" op het startscherm) worden los bijgehouden door
-    // de permanente listener uit mijnRestaurantsEigenaarSyncStarten() — die loopt sowieso al,
-    // ook los van of je dit specifieke restaurant nu open hebt staan.
-    render();
-  });
-  db.ref("restaurants/" + code + "/thema").on("value", snap => {
-    state.thema = snap.val() || null;
-    toepassenThema(state.thema);
-    render();
-  });
-  db.ref("restaurants/" + code + "/waarschuwing").on("value", snap => {
-    state.waarschuwing = snap.val() || null;
-    render();
-  });
-  db.ref("restaurants/" + code + "/plattegrond").on("value", snap => {
-    state.plattegrond = snap.val() || {};
-    render();
-  });
-  db.ref("restaurants/" + code + "/categorieen").on("value", snap => {
-    state.categorieen = snap.val() || {};
-    render();
-  });
-  // Teamchat: iedereen in dit restaurant leest live mee, ongeacht rechten.
-  db.ref("restaurants/" + code + "/chat").on("value", snap => {
-    state.chat = snap.val() || {};
-    render();
-  });
-  render();
-}
-
-function bestellingVerzenden(){
-  const items = Object.values(state.winkelwagen);
-  if(items.length === 0) return;
-  const ref = db.ref("restaurants/" + state.restaurantCode + "/bestellingen").push();
-  ref.set({
-    items: items,
-    tafel: state.tafel || "",
-    status: "nieuw",
-    aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => toonToast("Bestelling verzonden naar de keuken"));
-  if(state.actieveTafelCel){
-    // Deze tafel gaat op bezet totdat er is afgerekend via "Tafel betaald".
-    db.ref("restaurants/" + state.restaurantCode + "/plattegrond/" + state.actieveTafelCel + "/bezet").set(true);
-  } else {
-    state.tafel = "";
-  }
-  state.winkelwagen = {};
-  render();
-}
-// Rekent een tafel af: geeft de tafel weer vrij op de plattegrond. De reeds verzonden
-// bestellingen van die tafel blijven gewoon hun eigen weg volgen (keuken → bezorgen → historie).
-function tafelBetaald(cel){
-  if(!cel) return;
-  db.ref("restaurants/" + state.restaurantCode + "/plattegrond/" + cel + "/bezet").set(false).then(() => {
-    toonToast("Tafel afgerekend en vrijgegeven");
-  });
-  state.actieveTafelCel = null;
-  state.tafel = "";
-  state.bestelModus = "plattegrond";
-  render();
-}
-function statusBijwerken(orderId, status){
-  db.ref("restaurants/" + state.restaurantCode + "/bestellingen/" + orderId).update({
-    status: status,
-    bijgewerkt: firebase.database.ServerValue.TIMESTAMP,
-  });
-}
-function bestellingBezorgd(orderId){
-  const bestelling = state.bestellingen[orderId];
-  if(!bestelling) return;
-  db.ref("restaurants/" + state.restaurantCode + "/historie/" + orderId).set({
-    ...bestelling,
-    status: "bezorgd",
-    bezorgd: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => {
-    db.ref("restaurants/" + state.restaurantCode + "/bestellingen/" + orderId).remove();
-    toonToast("Bestelling bezorgd en toegevoegd aan historie");
-  });
-}
-function historieVerwijderen(id){
-  if(!confirm("Deze bestelling uit de historie verwijderen?")) return;
-  db.ref("restaurants/" + state.restaurantCode + "/historie/" + id).remove().then(() => {
-    toonToast("Bestelling verwijderd uit historie");
-  });
-}
-function historieWissen(){
-  if(!confirm("Weet je zeker dat je de hele geschiedenis van dit restaurant wilt wissen? Dit kan niet ongedaan gemaakt worden.")) return;
-  db.ref("restaurants/" + state.restaurantCode + "/historie").remove();
-}
-function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
-  naam = naam.trim();
-  if(!naam || !prijs || !categorie) return;
-  if(naam.length > MAX_LETTERS_PRODUCTNAAM){
-    toonToast(`Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.`);
-    return;
-  }
-  db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
-    naam: naam,
-    prijs: parseFloat(prijs.replace(",", ".")) || 0,
-    categorie: categorie,
-    emoji: emoji || "🍽️",
-    ijsKeuze: !!ijsKeuze,
-    slagroomKeuze: !!slagroomKeuze,
-    glasKeuze: !!glasKeuze,
-    uitverkocht: false,
-  });
-}
-function menuItemVerwijderen(id){
-  db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).remove();
-}
-function menuItemUitverkochtWijzigen(id, waarde){
-  db.ref("restaurants/" + state.restaurantCode + "/menu/" + id + "/uitverkocht").set(!!waarde);
-}
-function menuItemBewerkStarten(id){
-  const item = state.menu[id];
-  if(!item) return;
-  state.bewerkMenuId = id;
-  state.nieuwProductEmoji = item.emoji || "🍽️";
-  state.emojiPickerOpen = false;
-  render();
-}
-function menuItemBewerkAnnuleren(){
-  state.bewerkMenuId = null;
-  state.nieuwProductEmoji = "🍽️";
-  render();
-}
-function menuItemBewerkOpslaan(id, naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
-  naam = (naam || "").trim();
-  if(!naam || !prijs || !categorie) return;
-  if(naam.length > MAX_LETTERS_PRODUCTNAAM){
-    toonToast(`Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.`);
-    return;
-  }
-  db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).update({
-    naam: naam,
-    prijs: parseFloat(prijs.replace(",", ".")) || 0,
-    categorie: categorie,
-    emoji: emoji || "🍽️",
-    ijsKeuze: !!ijsKeuze,
-    slagroomKeuze: !!slagroomKeuze,
-    glasKeuze: !!glasKeuze,
-  }).then(() => {
-    state.bewerkMenuId = null;
-    state.nieuwProductEmoji = "🍽️";
-    render();
-  });
-}
-
-// ---------- categorieën (aan te maken in Instellingen > Producten, te kiezen per product) ----------
-function categorieenGesorteerd(){
-  return Object.entries(state.categorieen || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
-}
-function categorieToevoegen(naam){
-  naam = (naam || "").trim();
-  if(!naam) return;
-  const bestaatAl = Object.values(state.categorieen || {}).some(c => (c.naam||"").toLowerCase() === naam.toLowerCase());
-  if(bestaatAl){ toonToast("Deze categorie bestaat al"); return; }
-  db.ref("restaurants/" + state.restaurantCode + "/categorieen").push().set({
-    naam: naam,
-    aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-  });
-}
-function categorieVerwijderen(id){
-  if(!confirm("Deze categorie verwijderen? Producten die deze categorie al hadden, blijven gewoon bestaan en verschijnen bij Bestellen nog steeds onder hun (oude) categorienaam.")) return;
-  db.ref("restaurants/" + state.restaurantCode + "/categorieen/" + id).remove();
-}
-
-// ---------- systeemupdates als gelezen markeren (alleen lokaal, per apparaat) ----------
-function updateGelezenMarkeren(id){
-  if(!state.gelezenUpdates.includes(id)){
-    state.gelezenUpdates.push(id);
-    localStorage.setItem("ticket_gelezen_updates", JSON.stringify(state.gelezenUpdates));
-  }
-  render();
-}
-
-// ---------- teamchat (alle teamleden van dit restaurant, los van de losse rechten) ----------
-// Iedereen in het team mag hier onbeperkt in chatten, totdat de eigenaar de chatfunctie voor
-// dat specifieke teamlid uitzet (zie ledChatToggle hierboven, in te stellen bij Team & rechten).
-// Wie geblokkeerd is, kan de chat nog wel gewoon lezen — alleen versturen lukt dan niet meer.
-function chatBerichtVersturen(tekst){
-  tekst = (tekst || "").trim();
-  if(!tekst) return;
-  const eigenLid = state.leden[state.ledId];
-  if(eigenLid && eigenLid.chatGeblokkeerd){
-    toonToast("De eigenaar heeft de chatfunctie voor jou uitgezet.");
-    return;
-  }
-  db.ref("restaurants/" + state.restaurantCode + "/chat").push({
-    ledId: state.ledId,
-    naam: (eigenLid && eigenLid.naam) || state.gebruikersNaam || "Onbekend",
-    tekst: tekst,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => {
-    const veld = document.getElementById("chat-tekst");
-    if(veld) veld.value = "";
-    render();
-  });
-}
-
-// ---------- team & rechten (alleen te beheren door de eigenaar van het restaurant) ----------
-function ledFunctieWijzigen(ledId, functie){
-  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/functie").set(functie.trim());
-}
-function ledRechtToggle(ledId, recht, waarde){
-  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/rechten/" + recht).set(waarde);
-}
-function ledVerwijderen(ledId){
-  if(!confirm("Dit teamlid verwijderen? Diegene moet opnieuw joinen om weer toegang te krijgen.")) return;
-  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId).remove();
-}
-// De eigenaar zet de chatfunctie van een (niet-eigenaar) teamlid aan of uit. Standaard mag
-// iedereen onbeperkt chatten (chatGeblokkeerd staat dan niet in de data); pas als de eigenaar
-// het uitzet, kan dat teamlid de teamchat alleen nog lezen, niet meer schrijven.
-function ledChatToggle(ledId, magChatten){
-  if(magChatten){
-    db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/chatGeblokkeerd").remove();
-  } else {
-    db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/chatGeblokkeerd").set(true);
-  }
-}
-// Eigenaar draagt het eigenaarschap over aan een ander (bestaand) teamlid. Jijzelf wordt
-// meteen gewoon teamlid terug (met alle rechten, zodat je zelf niets kwijtraakt), de gekozen
-// persoon wordt de nieuwe eigenaar. Eén atomische update, dus er is nooit een moment zonder
-// eigenaar. Onomkeerbaar vanaf hier — de nieuwe eigenaar kan jouw rechten later aanpassen.
-function ledEigenaarschapOverzetten(nieuwLedId){
-  const eigenLid = state.leden[state.ledId];
-  if(!eigenLid || !eigenLid.eigenaar) return;
-  const nieuweEigenaar = state.leden[nieuwLedId];
-  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
-  if(!confirm(`Eigenaarschap overdragen aan "${nieuweEigenaar.naam}"? Jij wordt daarna zelf gewoon teamlid (met alle rechten) en verliest de eigenaar-rol.`)) return;
-  const updates = {};
-  updates["leden/" + state.ledId + "/eigenaar"] = false;
-  updates["leden/" + state.ledId + "/rechten"] = { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true };
-  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
-  updates["leden/" + nieuwLedId + "/rechten"] = null;
-  db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
-    toonToast(`${nieuweEigenaar.naam} is nu eigenaar`);
-  });
-}
-// Een restaurant mag meerdere eigenaren tegelijk hebben. De eigenaar voegt een bestaand
-// teamlid toe als mede-eigenaar — dat teamlid krijgt volledige rechten, ernaast blijf je
-// zelf ook gewoon eigenaar (in tegenstelling tot overzetten hierboven, dat je eigen
-// eigenaarschap juist beëindigt).
-function ledEigenaarToevoegen(nieuwLedId){
-  const eigenLid = state.leden[state.ledId];
-  if(!eigenLid || !eigenLid.eigenaar) return;
-  const nieuweEigenaar = state.leden[nieuwLedId];
-  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
-  if(!confirm(`"${nieuweEigenaar.naam}" toevoegen als mede-eigenaar? Diegene krijgt dan dezelfde volledige rechten als jij — je blijft daarnaast zelf ook gewoon eigenaar.`)) return;
-  const updates = {};
-  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
-  updates["leden/" + nieuwLedId + "/rechten"] = null;
-  db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
-    toonToast(`${nieuweEigenaar.naam} is nu ook eigenaar`);
-  });
-}
-// Tegenhanger van hierboven: een eigenaar kan alleen zíjn/haar EIGEN eigenaarschap intrekken
-// (niet dat van een andere eigenaar) — je wordt dan gewoon teamlid met standaardrechten. Niet
-// mogelijk als je de laatste overgebleven eigenaar bent; draag dan eerst over via "Overzetten".
-function eigenEigenaarschapIntrekken(){
-  const eigenLid = state.leden[state.ledId];
-  if(!eigenLid || !eigenLid.eigenaar) return;
-  const aantalEigenaren = Object.values(state.leden).filter(l => l.eigenaar).length;
-  if(aantalEigenaren <= 1){ toonToast("Je bent de enige eigenaar — draag eerst over via 'Overzetten' voordat je zelf stopt als eigenaar."); return; }
-  if(!confirm("Je eigen eigenaarschap intrekken? Je wordt dan gewoon teamlid met de standaardrechten en kunt het team hierna niet meer beheren.")) return;
-  const updates = {};
-  updates["leden/" + state.ledId + "/eigenaar"] = false;
-  updates["leden/" + state.ledId + "/rechten"] = STANDAARD_RECHTEN;
-  db.ref("restaurants/" + state.restaurantCode).update(updates).then(() => {
-    toonToast("Je bent geen eigenaar meer");
-  });
-}
-// Sitebeheer-variant "toevoegen": voegt iemand toe als (mede-)eigenaar van een ánder restaurant
-// dan waar je zelf lid van bent. Voegt alleen toe — bestaande eigenaren blijven gewoon eigenaar.
-function beheerLidEigenaarToevoegen(code, nieuwLedId){
-  const gegevens = state.alleRestaurants[code];
-  if(!gegevens) return;
-  const leden = gegevens.leden || {};
-  const nieuweEigenaar = leden[nieuwLedId];
-  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
-  if(!confirm(`Als sitebeheer "${nieuweEigenaar.naam}" toevoegen als (mede-)eigenaar van "${gegevens.naam}"?`)) return;
-  const updates = {};
-  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
-  updates["leden/" + nieuwLedId + "/rechten"] = null;
-  db.ref("restaurants/" + code).update(updates).then(() => {
-    toonToast(`${nieuweEigenaar.naam} is nu (mede-)eigenaar van ${gegevens.naam}`);
-  });
-}
-// Sitebeheer-variant "overzetten": zet het eigenaarschap volledig over naar dit teamlid — alle
-// huidige eigenaren worden gewoon teamlid (met alle rechten, zodat ze niets kwijtraken), en dit
-// teamlid wordt de (enige) nieuwe eigenaar. Bedoeld voor als de bestaande eigenaren niet meer
-// bereikbaar zijn — een beheerder-only overrule-actie.
-function beheerLidEigenaarschapOverzetten(code, nieuwLedId){
-  const gegevens = state.alleRestaurants[code];
-  if(!gegevens) return;
-  const leden = gegevens.leden || {};
-  const nieuweEigenaar = leden[nieuwLedId];
-  if(!nieuweEigenaar || nieuweEigenaar.eigenaar) return;
-  const huidigeEigenarenIds = Object.keys(leden).filter(id => leden[id].eigenaar);
-  if(!confirm(`Als sitebeheer het eigenaarschap van "${gegevens.naam}" volledig overzetten naar "${nieuweEigenaar.naam}"? De huidige eigena${huidigeEigenarenIds.length===1?"ar wordt":"ren worden"} dan gewoon teamlid.`)) return;
-  const updates = {};
-  huidigeEigenarenIds.forEach(id => {
-    updates["leden/" + id + "/eigenaar"] = false;
-    updates["leden/" + id + "/rechten"] = { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true };
-  });
-  updates["leden/" + nieuwLedId + "/eigenaar"] = true;
-  updates["leden/" + nieuwLedId + "/rechten"] = null;
-  db.ref("restaurants/" + code).update(updates).then(() => {
-    toonToast(`${nieuweEigenaar.naam} is nu eigenaar van ${gegevens.naam}`);
-  });
-}
-// Wijzigt je naam SITE-BREED — je site-brede identiteit (Sitebeheer > Gebruikers, en de
-// standaardnaam bij een volgend restaurant maken/joinen) én je naam bij elk restaurant waar
-// je op dit toestel lid van bent, allemaal in één keer. Mag door elk teamlid, ook de eigenaar
-// zelf (in tegenstelling tot functie/rechten hierboven, die alleen de eigenaar bij ándere
-// leden mag zetten).
-function eigenNaamWijzigen(nieuweNaam){
-  nieuweNaam = (nieuweNaam || "").trim();
-  if(!nieuweNaam){ toonToast("Vul een naam in."); return; }
-  if(nieuweNaam.length > MAX_LETTERS_SITE_NAAM){ toonToast(`Maximaal ${MAX_LETTERS_SITE_NAAM} letters.`); return; }
-
-  // Site-brede naam (naamscherm, Sitebeheer > Gebruikers) — geen voorafgaande lees-actie
-  // nodig, zie gebruikerRegistreren() hierboven voor waarom.
-  state.siteGebruikersNaam = nieuweNaam;
-  localStorage.setItem("ticket_site_naam", nieuweNaam);
-  db.ref("gebruikers/" + state.apparaatId).update({
-    naam: nieuweNaam,
-    laatsteBezoek: firebase.database.ServerValue.TIMESTAMP,
-  });
-
-  // Naam bijwerken bij elk restaurant op dit apparaat, niet alleen het restaurant dat nu open staat.
-  const schrijfActies = state.mijnRestaurants.map(r =>
-    db.ref("restaurants/" + r.code + "/leden/" + r.ledId + "/naam").set(nieuweNaam).then(() => {
-      r.gebruikersNaam = nieuweNaam;
-    })
-  );
-
-  Promise.all(schrijfActies).then(() => {
-    state.gebruikersNaam = nieuweNaam;
-    localStorage.setItem("ticket_restaurants", JSON.stringify(state.mijnRestaurants));
-    toonToast("Naam overal aangepast");
-    render();
-  });
-}
-
-// ---------- plattegrond (tafels & stoelen) ----------
-// Bouwt een klein "3D" stoeltje (zit + rugleuning) dat mee kan draaien met obj.rotatie, zonder
-// er ooit "op zijn kop" uit te zien zoals een geroteerd 🪑-emoji zou doen.
-// Bouwt een klein houten stoeltje van bovenaf (zit + rugleuning-kapje) — net als een echt
-// plattegrond-symbool — dat mee kan draaien met obj.rotatie, zonder er ooit "op zijn kop" uit
-// te zien zoals een geroteerd 🪑-emoji zou doen.
-function stoelIconHtml(rotatie){
-  return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
-    <span class="plattegrond__stoel-icoon__rug"></span>
-    <span class="plattegrond__stoel-icoon__zit"></span>
-  </span>`;
-}
-function plattegrondCelKlikken(cel){
-  if(!heeftRecht('instellingen')) return;
-  const tool = state.plattegrondTool;
-  const huidige = (state.plattegrond || {})[cel];
-  const ref = db.ref("restaurants/" + state.restaurantCode + "/plattegrond/" + cel);
-  if(tool === "wissen"){
-    if(huidige) ref.remove();
-    return;
-  }
-  if(huidige && huidige.type === tool){
-    if(tool === "stoel"){
-      // Nogmaals klikken op een stoel haalt 'm niet weg, maar draait 'm een kwart slag —
-      // zo kun je 'm blijven draaien tot de juiste kant. Alleen de "Wissen"-knop verwijdert 'm.
-      const nieuweRotatie = ((huidige.rotatie || 0) + 90) % 360;
-      ref.update({ rotatie: nieuweRotatie });
-    } else {
-      ref.remove();
-    }
-  } else if(tool === "tafel"){
-    // Nieuwe tafel: geef 'm automatisch het eerstvolgende tafelnummer.
-    const bestaandeNummers = Object.values(state.plattegrond || {})
-      .filter(c => c.type === "tafel").map(c => c.nummer || 0);
-    const volgendeNummer = bestaandeNummers.length ? Math.max(...bestaandeNummers) + 1 : 1;
-    ref.set({ type: "tafel", nummer: volgendeNummer, bezet: false });
-  } else {
-    ref.set({ type: tool });
-  }
-}
-
-// ---------- sitebeheer (Firebase Authentication — geen wachtwoord meer in de broncode) ----------
-// Alleen wie inlogt met een e-mail/wachtwoord-account dat JIJ aanmaakt in de Firebase-console
-// (Authentication → Sign-in method → E-mail/wachtwoord) kan dit vak openen. De controle gebeurt
-// bij Firebase zelf, niet in dit bestand — dus niet te vinden via "Weergave broncode".
-// De écht gevoelige actie (alle restaurants tegelijk opvragen) is bovendien met databaseregels
-// afgeschermd tot ingelogde gebruikers — zie de regels in readme.md.
-const BEHEER_MAX_POGINGEN = 3;
-const BEHEER_LOCKOUT_MINUTEN = 15;
-
-// Bijhouden van mislukte inlogpogingen bij Sitebeheer, lokaal per apparaat/browser — na
-// BEHEER_MAX_POGINGEN mislukte pogingen achter elkaar wordt inloggen hier tijdelijk geblokkeerd.
-function beheerPogingenStatus(){
-  try {
-    return JSON.parse(localStorage.getItem("ticket_beheer_pogingen")) || { aantal: 0, geblokkeerdTot: 0 };
-  } catch(e){
-    return { aantal: 0, geblokkeerdTot: 0 };
-  }
-}
-function beheerPogingenOpslaan(status){
-  localStorage.setItem("ticket_beheer_pogingen", JSON.stringify(status));
-}
-function beheerMinutenTotOntgrendeld(){
-  const status = beheerPogingenStatus();
-  if(!status.geblokkeerdTot || status.geblokkeerdTot <= Date.now()) return 0;
-  return Math.ceil((status.geblokkeerdTot - Date.now()) / 60000);
-}
-// Logt élke inlogpoging (gelukt én mislukt) in de database, zodat jij als eigenaar in
-// Sitebeheer zelf kunt zien of iemand geprobeerd heeft binnen te komen.
-function beheerPogingLoggen(naam, email, succes){
-  db.ref("sitebeheer_pogingen").push({
-    naam: naam || "(geen naam ingevuld)",
-    email: email || "(leeg)",
-    succes: !!succes,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  });
-}
-function beheerPaneelOpenen(){
-  state.beheerPaneelOpen = true;
-  state.beheerFoutmelding = "";
-  if(state.beheerderActief){
-    alleRestaurantsLuisteren();
-    sitebeheerPogingenLuisteren();
-    feedbackLuisteren();
-    gebruikersLuisteren();
-    bansLuisteren();
-  }
-  render();
-}
-function beheerInloggen(naam, email, wachtwoord){
-  naam = (naam || "").trim();
-  email = (email || "").trim();
-  wachtwoord = wachtwoord || "";
-  const minutenOver = beheerMinutenTotOntgrendeld();
-  if(minutenOver > 0){
-    state.beheerFoutmelding = `Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.`;
-    render();
-    return;
-  }
-  if(!naam){ state.beheerFoutmelding = "Vul je naam in."; render(); return; }
-  if(!email || !wachtwoord){ state.beheerFoutmelding = "Vul e-mail en wachtwoord in."; render(); return; }
-  state.beheerFoutmelding = "Bezig met inloggen…";
-  render();
-  auth.signInWithEmailAndPassword(email, wachtwoord)
-    .then(cred => {
-      beheerPogingenOpslaan({ aantal: 0, geblokkeerdTot: 0 });
-      beheerPogingLoggen(naam, email, true);
-      // Zelf meteen de beheerder-check doen en de melding wegnemen, in plaats van alleen op
-      // onAuthStateChanged te wachten: die vuurt niet opnieuw af als je met dit account al
-      // was ingelogd (bijv. omdat het ook je gewone account is) — dan bleef "Bezig met
-      // inloggen…" anders voor altijd staan.
-      db.ref("beheerders/" + cred.user.uid).once("value").then(snap => {
-        state.beheerderActief = snap.val() === true;
-        state.beheerFoutmelding = state.beheerderActief ? "" : "Dit account heeft geen sitebeheer-rechten.";
-        if(state.beheerderActief){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
-        render();
-      }).catch(() => {
-        state.beheerFoutmelding = "";
-        render();
-      });
-    })
-    .catch(() => {
-      beheerPogingLoggen(naam, email, false);
-      const status = beheerPogingenStatus();
-      const nieuwAantal = (status.aantal || 0) + 1;
-      if(nieuwAantal >= BEHEER_MAX_POGINGEN){
-        beheerPogingenOpslaan({ aantal: 0, geblokkeerdTot: Date.now() + BEHEER_LOCKOUT_MINUTEN * 60000 });
-        state.beheerFoutmelding = `Onjuiste inloggegevens. Te veel mislukte pogingen — probeer het over ${BEHEER_LOCKOUT_MINUTEN} minuten opnieuw.`;
-      } else {
-        beheerPogingenOpslaan({ aantal: nieuwAantal, geblokkeerdTot: 0 });
-        state.beheerFoutmelding = `Onjuiste inloggegevens (poging ${nieuwAantal} van ${BEHEER_MAX_POGINGEN}).`;
-      }
-      render();
-    });
-}
-function beheerderUitloggen(){
-  auth.signOut();
-  db.ref("restaurants").off();
-  db.ref("sitebeheer_pogingen").off();
-  db.ref("feedback").off();
-  db.ref("gebruikers").off();
-  db.ref("bans").off();
-  state.alleRestaurants = {};
-  state.alleRestaurantsGeladen = false;
-  state.sitebeheerPogingen = {};
-  state.feedback = {};
-  state.gebruikersLijst = {};
-  state.gebruikersLijstGeladen = false;
-  state.bansLijst = {};
-  if(state.beheerBezoekModus) beheerRestaurantVerlaten(false);
-  state.beheerPaneelOpen = false;
-  render();
-}
-function beheerPaneelSluiten(){
-  if(state.beheerBezoekModus){ beheerRestaurantVerlaten(false); }
-  db.ref("restaurants").off();
-  db.ref("sitebeheer_pogingen").off();
-  db.ref("feedback").off();
-  db.ref("gebruikers").off();
-  db.ref("bans").off();
-  state.alleRestaurants = {};
-  state.alleRestaurantsGeladen = false;
-  state.sitebeheerPogingen = {};
-  state.feedback = {};
-  state.gebruikersLijst = {};
-  state.gebruikersLijstGeladen = false;
-  state.bansLijst = {};
-  state.beheerPaneelOpen = false;
-  render();
-}
-// Luistert live naar élk restaurant in de database, alleen zolang het beheerpaneel open is.
-function alleRestaurantsLuisteren(){
-  db.ref("restaurants").on("value", snap => {
-    state.alleRestaurants = snap.val() || {};
-    state.alleRestaurantsGeladen = true;
-    render();
-  });
-}
-// Luistert live naar de laatste 50 inlogpogingen bij Sitebeheer, alleen zolang het paneel open is.
-function sitebeheerPogingenLuisteren(){
-  db.ref("sitebeheer_pogingen").limitToLast(50).on("value", snap => {
-    state.sitebeheerPogingen = snap.val() || {};
-    render();
-  });
-}
-function sitebeheerPogingVerwijderen(id){
-  db.ref("sitebeheer_pogingen/" + id).remove();
-}
-// Stuurt een bericht van een bezoeker naar sitebeheer (bijv. "ik zou graag X willen"), vanaf het
-// aparte "Bericht naar sitebeheer"-vak op het startscherm. Dit werkt zonder inloggen — net als de
-// rest van de app voor teamleden — en komt terecht in een apart, alleen-voor-ingelogde-beheerders-
-// leesbaar deel van de database (zie readme.md).
-// Geen wachttijd: iedereen kan hier gewoon zo vaak sturen als nodig is — als sitebeheer spam wil
-// voorkomen, kan dat via een blokkade van dat apparaat (zie hieronder).
-function feedbackVersturen(tekst){
-  tekst = (tekst || "").trim();
-  if(!tekst) return;
-  db.ref("feedback").push({
-    afzender: state.gebruikersNaam || state.siteGebruikersNaam || "(onbekend)",
-    tekst: tekst,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => {
-    const veld = document.getElementById("feedback-tekst");
-    if(veld) veld.value = "";
-    toonToast("Bericht verstuurd naar sitebeheer");
-  });
-}
-// Luistert live naar de laatste 100 feedback-berichten, alleen zolang het beheerpaneel open is.
-function feedbackLuisteren(){
-  db.ref("feedback").limitToLast(100).on("value", snap => {
-    state.feedback = snap.val() || {};
-    render();
-  });
-}
-function feedbackVerwijderen(id){
-  db.ref("feedback/" + id).remove();
-}
-// ---------- blokkade-berichten (bezwaar/appeal tussen geblokkeerd apparaat en sitebeheer) ----------
-// Een geblokkeerd apparaat kan sitebeheer een bericht sturen (bijv. "dit is een vergissing");
-// sitebeheer kan daar in het beheerpaneel op reageren. Het gesprek staat onder de blokkade zelf
-// (bans/{apparaatId}/berichten), zodat het meekomt met de bestaande live blokkade-check.
-// Geen wachttijd tussen berichten: een geblokkeerd apparaat kan gewoon doorchatten met
-// sitebeheer totdat sitebeheer de berichtenfunctie voor dat apparaat expliciet uitzet
-// (zie beheerBanBerichtenBlokkeren hieronder) — dat is de enige rem op dit kanaal.
-function banBerichtVersturenGebruiker(tekst){
-  tekst = (tekst || "").trim();
-  if(!tekst || !state.geblokkeerd) return;
-  if(state.geblokkeerd.berichtenGeblokkeerd){
-    toonToast("Sitebeheer heeft de berichtenfunctie voor jou uitgezet.");
-    return;
-  }
-  db.ref("bans/" + state.apparaatId + "/berichten").push({
-    van: "gebruiker",
-    tekst: tekst,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => {
-    const veld = document.getElementById("ban-bericht-tekst");
-    if(veld) veld.value = "";
-    toonToast("Bericht verstuurd naar sitebeheer");
-    render();
-  });
-}
-// Sitebeheer zet de berichtenfunctie van een geblokkeerd apparaat aan of uit — bijv. als iemand
-// het bezwaar-kanaal misbruikt om te blijven spammen terwijl ze al geblokkeerd zijn.
-function beheerBanBerichtenBlokkeren(apparaatId){
-  db.ref("bans/" + apparaatId + "/berichtenGeblokkeerd").set(true).then(() => toonToast("Berichtenfunctie uitgezet voor dit apparaat"));
-}
-function beheerBanBerichtenDeblokkeren(apparaatId){
-  db.ref("bans/" + apparaatId + "/berichtenGeblokkeerd").remove().then(() => toonToast("Berichtenfunctie weer aangezet"));
-}
-// Sitebeheer verwijdert het hele bezwaar-gesprek met een (voorheen) geblokkeerd apparaat.
-function beheerBanChatVerwijderen(apparaatId){
-  if(!confirm("Dit hele gesprek verwijderen? Dit kan niet ongedaan gemaakt worden.")) return;
-  db.ref("bans/" + apparaatId + "/berichten").remove().then(() => toonToast("Gesprek verwijderd"));
-}
-// Antwoord van sitebeheer terug naar een geblokkeerd apparaat.
-function banBerichtVersturenBeheer(apparaatId, tekst){
-  tekst = (tekst || "").trim();
-  if(!tekst) return;
-  db.ref("bans/" + apparaatId + "/berichten").push({
-    van: "beheer",
-    tekst: tekst,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => {
-    const veld = document.getElementById("beheer-ban-bericht-tekst-" + apparaatId);
-    if(veld) veld.value = "";
-    toonToast("Antwoord verstuurd");
-  });
-}
-// Klapt het berichten-paneel bij een gebruiker in het sitebeheer-paneel open of dicht.
-function beheerBanChatTogglen(apparaatId){
-  state.beheerBanChatOpenId = state.beheerBanChatOpenId === apparaatId ? null : apparaatId;
-  render();
-}
-// ---------- gebruikers & blokkades (Sitebeheer) ----------
-// Luistert live naar alle apparaten die ooit een site-naam hebben ingevuld, alleen zolang
-// het beheerpaneel open is.
-function gebruikersLuisteren(){
-  db.ref("gebruikers").on("value", snap => {
-    state.gebruikersLijst = snap.val() || {};
-    state.gebruikersLijstGeladen = true;
-    render();
-  });
-}
-// Luistert live naar alle blokkades (actief én verlopen), alleen zolang het beheerpaneel open is.
-function bansLuisteren(){
-  db.ref("bans").on("value", snap => {
-    state.bansLijst = snap.val() || {};
-    render();
-  });
-}
-// Blokkeert een apparaat voor de opgegeven duur (in milliseconden), of voor onbepaalde tijd
-// als duurMs null/0 is. Overschrijft een eventuele bestaande blokkade van dat apparaat.
-// duurLabel is puur voor de toast-melding.
-function beheerGebruikerBlokkeren(apparaatId, duurMs, duurLabel){
-  const gebruiker = state.gebruikersLijst[apparaatId];
-  const naam = gebruiker ? gebruiker.naam : apparaatId;
-  const payload = { naam, sinds: firebase.database.ServerValue.TIMESTAMP };
-  if(duurMs) payload.totEnMet = Date.now() + duurMs;
-  db.ref("bans/" + apparaatId).set(payload).then(() => {
-    toonToast(duurMs ? `${naam} geblokkeerd voor ${duurLabel}` : `${naam} voor onbepaalde tijd geblokkeerd`);
-  });
-}
-function beheerGebruikerBlokkerenDagen(apparaatId){
-  const gebruiker = state.gebruikersLijst[apparaatId];
-  const naam = gebruiker ? gebruiker.naam : apparaatId;
-  const invoer = prompt(`Hoeveel dagen wil je "${naam}" blokkeren?`, "7");
-  if(invoer === null) return;
-  const dagen = parseInt(invoer, 10);
-  if(!dagen || dagen < 1){ toonToast("Vul een geldig aantal dagen in (1 of meer)."); return; }
-  beheerGebruikerBlokkeren(apparaatId, dagen * 24 * 60 * 60 * 1000, `${dagen} dag${dagen===1?"":"en"}`);
-}
-// Kortdurende blokkade ("timeout") in minuten — voor als een hele dag te lang is, bijv.
-// iemand die tijdens een dienst even lastig doet en na een half uurtje weer welkom is.
-function beheerGebruikerBlokkerenTimeout(apparaatId){
-  const gebruiker = state.gebruikersLijst[apparaatId];
-  const naam = gebruiker ? gebruiker.naam : apparaatId;
-  const invoer = prompt(`Timeout voor "${naam}" — hoeveel minuten?`, "30");
-  if(invoer === null) return;
-  const minuten = parseInt(invoer, 10);
-  if(!minuten || minuten < 1){ toonToast("Vul een geldig aantal minuten in (1 of meer)."); return; }
-  beheerGebruikerBlokkeren(apparaatId, minuten * 60 * 1000, `${minuten} minuut${minuten===1?"":"en"}`);
-}
-function beheerGebruikerBlokkerenOneindig(apparaatId){
-  const gebruiker = state.gebruikersLijst[apparaatId];
-  const naam = gebruiker ? gebruiker.naam : apparaatId;
-  if(!confirm(`"${naam}" voor onbepaalde tijd blokkeren?`)) return;
-  beheerGebruikerBlokkeren(apparaatId, null, null);
-}
-// Heft een blokkade op — werkt ook voor een blokkade die op "oneindig" stond.
-function beheerGebruikerDeblokkeren(apparaatId){
-  const gebruiker = state.gebruikersLijst[apparaatId];
-  const naam = gebruiker ? gebruiker.naam : apparaatId;
-  db.ref("bans/" + apparaatId).remove().then(() => toonToast(`${naam} gedeblokkeerd`));
-}
-// Als beheerder een restaurant van iemand anders openen — met volledige rechten, zonder
-// dat dit iets aan je eigen apparaat-instellingen (localStorage) verandert.
-function beheerRestaurantBezoeken(code){
-  const gegevens = state.alleRestaurants[code];
-  if(!gegevens) return;
-  state.beheerBezoekModus = true;
-  state.restaurantCode = code;
-  state.restaurantNaam = gegevens.naam || code;
-  state.ledId = null;               // geen lid van dit restaurant → heeftRecht() staat alles toe
-  state.gebruikersNaam = "Beheerder";
-  state.actiefInRestaurant = true;
-  state.huidigeView = "bestellen";
-  state.leden = {};
-  state.ledenGeladen = false;
-  state.thema = null;
-  state.waarschuwing = null;
-  state.plattegrond = {};
-  state.categorieen = {};
-  state.chat = {};
-  bekendeBestellingStatussen = null;
-  db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
-  db.ref("restaurants/" + code + "/bestellingen").on("value", verwerkBestellingenSnapshot);
-  db.ref("restaurants/" + code + "/historie").on("value", snap => { state.historie = snap.val() || {}; render(); });
-  db.ref("restaurants/" + code + "/leden").on("value", snap => { state.leden = snap.val() || {}; state.ledenGeladen = true; render(); });
-  db.ref("restaurants/" + code + "/thema").on("value", snap => { state.thema = snap.val() || null; toepassenThema(state.thema); render(); });
-  db.ref("restaurants/" + code + "/waarschuwing").on("value", snap => { state.waarschuwing = snap.val() || null; render(); });
-  db.ref("restaurants/" + code + "/plattegrond").on("value", snap => { state.plattegrond = snap.val() || {}; render(); });
-  db.ref("restaurants/" + code + "/categorieen").on("value", snap => { state.categorieen = snap.val() || {}; render(); });
-  db.ref("restaurants/" + code + "/chat").on("value", snap => { state.chat = snap.val() || {}; render(); });
-  render();
-}
-// Sluit het bezoek aan een restaurant af en gaat terug naar het beheerpaneel (tenzij
-// doorRender false is, bijv. omdat beheerderUitloggen() zelf al gaat renderen).
-function beheerRestaurantVerlaten(doorRender){
-  const code = state.restaurantCode;
-  if(code){
-    db.ref("restaurants/" + code + "/menu").off();
-    db.ref("restaurants/" + code + "/bestellingen").off();
-    db.ref("restaurants/" + code + "/historie").off();
-    db.ref("restaurants/" + code + "/leden").off();
-    db.ref("restaurants/" + code + "/thema").off();
-    db.ref("restaurants/" + code + "/waarschuwing").off();
-    db.ref("restaurants/" + code + "/plattegrond").off();
-    db.ref("restaurants/" + code + "/categorieen").off();
-    db.ref("restaurants/" + code + "/chat").off();
-  }
-  toepassenThema(null);
-  state.beheerBezoekModus = false;
-  state.restaurantCode = null;
-  state.restaurantNaam = null;
-  state.ledId = null;
-  state.gebruikersNaam = null;
-  state.leden = {};
-  state.ledenGeladen = false;
-  state.thema = null;
-  state.waarschuwing = null;
-  state.plattegrond = {};
-  state.categorieen = {};
-  state.chat = {};
-  bekendeBestellingStatussen = null;
-  state.actiefInRestaurant = false;
-  state.winkelwagen = {};
-  if(doorRender !== false) render();
-}
-function beheerRestaurantVerwijderen(code){
-  const gegevens = state.alleRestaurants[code];
-  const naam = gegevens ? gegevens.naam : code;
-  if(!confirm(`Restaurant "${naam}" (${code}) volledig verwijderen? Dit verwijdert al het menu, alle bestellingen en de hele historie, en kan niet ongedaan gemaakt worden.`)) return;
-  if(state.beheerBezoekModus && state.restaurantCode === code) beheerRestaurantVerlaten(false);
-  // Meteen lokaal uit de lijst halen en renderen — niet wachten tot de server de verwijdering
-  // heeft bevestigd, anders blijft het restaurant nog even (of bij een tragere verbinding
-  // duidelijk merkbaar) in de lijst staan terwijl het al "weg" zou moeten zijn.
-  delete state.alleRestaurants[code];
-  render();
-  db.ref("restaurants/" + code).remove().then(() => {
-    toonToast("Restaurant verwijderd");
-  });
-}
-// Stuurt een waarschuwing naar één specifiek restaurant — zichtbaar als banner boven aan hun
-// scherm, voor alle teamleden van dat restaurant, totdat iemand daar 'm sluit (of sitebeheer
-// 'm intrekt). Overschrijft een eventuele eerder verstuurde waarschuwing aan dit restaurant.
-function beheerRestaurantWaarschuwen(code){
-  const gegevens = state.alleRestaurants[code];
-  const naam = gegevens ? gegevens.naam : code;
-  const bestaande = gegevens && gegevens.waarschuwing ? gegevens.waarschuwing.tekst : "";
-  const tekst = prompt(`Waarschuwing versturen naar "${naam}" (${code}):`, bestaande || "");
-  if(tekst === null) return;
-  const schoon = tekst.trim();
-  if(!schoon){ toonToast("Geen waarschuwing verstuurd — tekst was leeg."); return; }
-  db.ref("restaurants/" + code + "/waarschuwing").set({
-    tekst: schoon,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  }).then(() => toonToast("Waarschuwing verstuurd naar " + naam));
-}
-// Trekt een al verstuurde waarschuwing weer in, vanuit het sitebeheer-paneel.
-function beheerRestaurantWaarschuwingIntrekken(code){
-  db.ref("restaurants/" + code + "/waarschuwing").remove().then(() => toonToast("Waarschuwing ingetrokken"));
-}
-// Sitebeheer kan per restaurant een eigen letterlimiet instellen voor de restaurantnaam — dat
-// telt zowel bij het hernoemen in Instellingen als (via effectieveNaamLimiet) overal waar die
-// limiet gebruikt wordt. Leeg/0 invullen zet 'm terug naar de standaardlimiet.
-function beheerRestaurantNaamLimiet(code){
-  const gegevens = state.alleRestaurants[code];
-  const naam = gegevens ? gegevens.naam : code;
-  const huidige = gegevens && gegevens.naamLimiet ? String(gegevens.naamLimiet) : "";
-  const invoer = prompt(`Letterlimiet voor de restaurantnaam van "${naam}" (${code}) — laat leeg voor de standaardlimiet van ${MAX_LETTERS_RESTAURANTNAAM}:`, huidige);
-  if(invoer === null) return;
-  const schoon = invoer.trim();
-  if(!schoon){
-    db.ref("restaurants/" + code + "/naamLimiet").remove().then(() => toonToast(`Naamlimiet van ${naam} teruggezet naar standaard (${MAX_LETTERS_RESTAURANTNAAM})`));
-    return;
-  }
-  const limiet = parseInt(schoon, 10);
-  if(!limiet || limiet < 1){ toonToast("Vul een geldig aantal letters in (1 of meer), of laat leeg voor standaard."); return; }
-  db.ref("restaurants/" + code + "/naamLimiet").set(limiet).then(() => toonToast(`Naamlimiet van ${naam} ingesteld op ${limiet} letters`));
-}
-// Sluit de waarschuwing-banner vanuit het restaurant zelf (door een teamlid) — verwijdert 'm
-// voor iedereen, net als sitebeheer dat ook zou kunnen doen.
-function waarschuwingSluiten(){
-  if(!state.restaurantCode) return;
-  db.ref("restaurants/" + state.restaurantCode + "/waarschuwing").remove();
-}
-function siteUpdateToevoegen(titel, tekst){
-  if(!state.beheerderActief) return;
-  titel = (titel || "").trim();
-  tekst = tekst.trim();
-  if(!tekst) return;
-  db.ref("site_updates").push().set({
-    titel: titel,
-    tekst: tekst,
-    tijdstip: firebase.database.ServerValue.TIMESTAMP,
-  });
-}
-function siteUpdateVerwijderen(id){
-  if(!state.beheerderActief) return;
-  db.ref("site_updates/" + id).remove();
-}
-function siteUpdateBewerkStarten(id){
-  if(!state.beheerderActief) return;
-  state.bewerkSiteUpdateId = id;
-  render();
-}
-function siteUpdateBewerkAnnuleren(){
-  state.bewerkSiteUpdateId = null;
-  render();
-}
-function siteUpdateBewerkOpslaan(id, titel, tekst){
-  if(!state.beheerderActief) return;
-  titel = (titel || "").trim();
-  tekst = (tekst || "").trim();
-  if(!tekst) return;
-  db.ref("site_updates/" + id).update({ titel: titel, tekst: tekst })
-    .then(() => { state.bewerkSiteUpdateId = null; render(); });
-}
-
-// ---------- winkelwagen ----------
-// Telt het totaal aantal producten (som van alle aantallen) dat al in de winkelwagen zit.
-function wagenTotaalAantal(wagen){
-  return Object.values(wagen || {}).reduce((s, i) => s + (i.aantal || 0), 0);
-}
-function toevoegenAanWagen(id, item){
-  if(!item || item.uitverkocht) return;
-  if(wagenTotaalAantal(state.winkelwagen) >= MAX_PRODUCTEN_PER_BESTELLING){
-    toonToast(`Je kan maximaal ${MAX_PRODUCTEN_PER_BESTELLING} producten per bestelling bestellen.`);
-    return;
-  }
-  if(state.winkelwagen[id]){
-    state.winkelwagen[id].aantal += 1;
-  } else {
-    state.winkelwagen[id] = {
-      naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", categorie:item.categorie||"Overig",
-      aantal:1, notitie:"",
-      ijsKeuze: !!item.ijsKeuze,
-      slagroomKeuze: !!item.slagroomKeuze,
-      glasKeuze: !!item.glasKeuze,
-      ijs: false,
-      slagroom: false,
-      glas: false,
-    };
-  }
-  render();
-}
-function wagenAantalWijzigen(id, delta){
-  if(!state.winkelwagen[id]) return;
-  if(delta > 0 && wagenTotaalAantal(state.winkelwagen) >= MAX_PRODUCTEN_PER_BESTELLING){
-    toonToast(`Je kan maximaal ${MAX_PRODUCTEN_PER_BESTELLING} producten per bestelling bestellen.`);
-    return;
-  }
-  state.winkelwagen[id].aantal += delta;
-  if(state.winkelwagen[id].aantal <= 0) delete state.winkelwagen[id];
-  render();
-}
-function wagenVerwijderen(id){
-  delete state.winkelwagen[id];
-  render();
-}
-function wagenNotitieWijzigen(id, tekst){
-  if(state.winkelwagen[id]) state.winkelwagen[id].notitie = tekst;
-}
-function wagenIjsWijzigen(id, waarde){
-  if(state.winkelwagen[id]) state.winkelwagen[id].ijs = !!waarde;
-}
-function wagenSlagroomWijzigen(id, waarde){
-  if(state.winkelwagen[id]) state.winkelwagen[id].slagroom = !!waarde;
-}
-function wagenGlasWijzigen(id, waarde){
-  if(state.winkelwagen[id]) state.winkelwagen[id].glas = !!waarde;
-}
-// Bouwt de extra-informatieregel onder een besteld item (notitie, ijs, slagroom, glas).
-function itemExtraHtml(it){
-  const delen = [];
-  if(it.ijs) delen.push("🧊 Met ijs");
-  if(it.slagroom) delen.push("🥛 Met slagroom");
-  if(it.glas) delen.push("🥂 Heeft al een glas");
-  if(it.notitie) delen.push(it.notitie);
-  return delen.length ? `<span class="ticket__item-notitie">— ${delen.join(" · ")}</span>` : "";
-}
-
-// ---------- zelfbestellen: QR-code + printen ----------
-function qrLinkKopieren(){
-  navigator.clipboard?.writeText(zelfBestelUrl(state.restaurantCode));
-  toonToast("Link gekopieerd");
-}
-// Zet de QR-afbeelding tijdelijk in een eigen print-vak buiten #app, print 'm, en ruimt dat
-// vak daarna weer op. Wacht (indien nodig) tot de afbeelding echt geladen is voordat het
-// printvenster opent, zodat 'ie nooit als leeg vak wordt afgedrukt.
-function qrPrinten(){
-  const bronImg = document.getElementById("qr-img-algemeen");
-  if(!bronImg) return;
-  const printVak = document.createElement("div");
-  printVak.id = "print-qr-vak";
-  printVak.innerHTML = `
-    <div class="print-qr__naam">${state.restaurantNaam}</div>
-    <img id="print-qr-img" src="${bronImg.src}" alt="QR-code om zelf te bestellen">
-    <div class="print-qr__uitleg">Scan om zelf te bestellen</div>
-    <div class="print-qr__code">Code: ${state.restaurantCode}</div>
-  `;
-  document.body.appendChild(printVak);
-  const opruimen = () => { printVak.remove(); window.removeEventListener("afterprint", opruimen); };
-  window.addEventListener("afterprint", opruimen);
-
-  const printImg = document.getElementById("print-qr-img");
-  if(printImg.complete && printImg.naturalWidth > 0){
-    window.print();
-  } else {
-    printImg.addEventListener("load", () => window.print(), { once: true });
-    printImg.addEventListener("error", () => {
-      toonToast("QR-code kon niet geladen worden — controleer je internetverbinding");
-      opruimen();
-    }, { once: true });
-  }
-}
-
-// ============================================================
-// RENDER
-// ============================================================
-// ---------- focus/waarde behouden bij een re-render ----------
-// Zonder dit springt de cursor uit een invoerveld (en kan zelfs net getypte tekst verdwijnen)
-// zodra er, terwijl je aan het typen bent, ergens anders een live update binnenkomt (bv. een
-// nieuwe bestelling) die een render() triggert — want render() vervangt de hele DOM-boom.
-// Deze twee helpers onthouden welk veld actief was (op id, of anders op data-action+data-id)
-// mét de actuele waarde en cursorpositie, en zetten dat na de re-render weer terug.
-function huidigeFocusVastleggen(){
-  const el = document.activeElement;
-  if(!el || !root.contains(el) || !("value" in el)) return null;
-  return {
-    id: el.id || null,
-    action: el.dataset ? el.dataset.action || null : null,
-    dataId: el.dataset ? (el.dataset.id != null ? el.dataset.id : null) : null,
-    waarde: el.value,
-    selStart: (typeof el.selectionStart === "number") ? el.selectionStart : null,
-    selEnd: (typeof el.selectionEnd === "number") ? el.selectionEnd : null,
-  };
-}
-function focusHerstellen(bewaard){
-  if(!bewaard) return;
-  let el = null;
-  if(bewaard.id) el = document.getElementById(bewaard.id);
-  if(!el && bewaard.action){
-    const selector = bewaard.dataId != null
-      ? `[data-action="${bewaard.action}"][data-id="${CSS.escape(bewaard.dataId)}"]`
-      : `[data-action="${bewaard.action}"]`;
-    el = root.querySelector(selector);
-  }
-  if(!el || !("value" in el)) return;
-  el.value = bewaard.waarde;
-  el.focus();
-  if(bewaard.selStart !== null && typeof el.setSelectionRange === "function"){
-    try{ el.setSelectionRange(bewaard.selStart, bewaard.selEnd); }catch(err){ /* niet elk inputtype ondersteunt dit */ }
-  }
-}
-function render(){
-  const bewaardeFocus = huidigeFocusVastleggen();
-  renderScherm();
-  focusHerstellen(bewaardeFocus);
-}
-function renderScherm(){
-  // Blokkade-check gaat altijd voor: nog niet binnengekomen? Toon even niets ingrijpends
-  // (voorkomt dat de site al even zichtbaar is vóór we weten of dit apparaat geblokkeerd is).
-  if(!state.geblokkeerdGecontroleerd){
-    root.innerHTML = `
-      <div class="landing">
-        <div class="landing__mark">
-          <div class="landing__eyebrow">Welkom bij</div>
-          <h1 class="landing__title">${MERKNAAM}</h1>
-          <div class="landing__divider"><span class="landing__diamond"></span></div>
-        </div>
-      </div>`;
-    return;
-  }
-  // Sitebeheer blijft altijd bereikbaar, ook als dit apparaat geblokkeerd is — zo kan de
-  // eigenaar altijd inloggen (bijv. via een link op de blokkade-pagina), ook op een apparaat
-  // dat zelf geblokkeerd staat.
-  if(state.beheerPaneelOpen && !state.beheerBezoekModus){
-    renderBeheerPaneel();
-    return;
-  }
-  if(state.beheerBezoekModus){
-    renderDashboard();
-    return;
-  }
-  if(state.geblokkeerd){
-    renderGeblokkeerd();
-    return;
-  }
-  if(!state.siteGebruikersNaam){
-    renderSiteNaamGate();
-    return;
-  }
-  if(!state.actiefInRestaurant){
-    renderLanding();
-  } else {
-    renderDashboard();
-  }
-}
-// Verplicht scherm vóór de rest van de site: hier vul je je naam in, zodat sitebeheer
-// je (via je apparaat) eventueel op de banlijst kan zetten. Verschijnt maar één keer per
-// apparaat — de naam blijft daarna in localStorage staan.
-function renderSiteNaamGate(){
-  root.innerHTML = `
-    <div class="landing">
-      <div class="landing__mark">
-        <div class="landing__eyebrow">Welkom bij</div>
-        <h1 class="landing__title">${MERKNAAM}</h1>
-        <div class="landing__divider"><span class="landing__diamond"></span></div>
-      </div>
-      <div class="form-card">
-        <label class="form-card__label">Hoe mogen we je noemen?</label>
-        <input id="input-site-naam" type="text" placeholder="Bijv. Sara" maxlength="${MAX_LETTERS_SITE_NAAM}" autofocus>
-        <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Vul je naam in om verder te gaan naar ${MERKNAAM}.</p>
-        ${state.siteNaamInvoerFout ? `<div class="fout">${state.siteNaamInvoerFout}</div>` : ""}
-        <button class="btn btn--flame btn--block" data-action="site-naam-opslaan">Doorgaan</button>
-      </div>
-    </div>`;
-  const verstuur = () => siteNaamOpslaan(document.getElementById("input-site-naam").value);
-  document.getElementById("input-site-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
-}
-// Aparte pagina die een geblokkeerd apparaat te zien krijgt in plaats van de rest van de site —
-// blijft zichtbaar totdat de dagen om zijn of sitebeheer de blokkade opheft.
-function renderGeblokkeerd(){
-  const info = state.geblokkeerd;
-  const oneindig = typeof info.totEnMet !== "number";
-  const totTekst = oneindig ? "" : `, tot ${new Date(info.totEnMet).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}`;
-  const berichtenArr = Object.entries(info.berichten || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
-  const berichtenHtml = berichtenArr.length ? `
-    <div class="ban-chat">
-      ${berichtenArr.map(([id,b]) => `
-        <div class="ban-chat__bericht ban-chat__bericht--${b.van==='beheer'?'beheer':'gebruiker'}">
-          <div class="ban-chat__afzender">${b.van==='beheer' ? 'Sitebeheer' : 'Jij'}</div>
-          <div class="ban-chat__tekst">${b.tekst}</div>
-        </div>`).join("")}
-    </div>` : "";
-  const berichtenGeblokkeerd = !!info.berichtenGeblokkeerd;
-  const berichtVeldUit = berichtenGeblokkeerd;
-  const berichtStatusHtml = berichtenGeblokkeerd
-    ? `<p style="color:var(--ember); font-size:.8rem; margin-top:8px;">Sitebeheer heeft de berichtenfunctie hier uitgezet.</p>`
-    : "";
-  root.innerHTML = `
-    <div class="landing">
-      <div class="landing__mark">
-        <div class="landing__eyebrow">${MERKNAAM}</div>
-        <h1 class="landing__title">Toegang geblokkeerd</h1>
-        <div class="landing__divider"><span class="landing__diamond"></span></div>
-      </div>
-      <div class="form-card">
-        <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
-        <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Stuur hieronder een bericht naar sitebeheer — die kan je hier weer antwoorden.</p>
-        ${berichtenHtml}
-        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" ${berichtVeldUit?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
-        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen" ${berichtVeldUit?"disabled":""}>Versturen</button>
-        ${berichtStatusHtml}
-      </div>
-      <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
-    </div>`;
-}
-
-// Balkje bovenaan het startscherm met de inlogstatus: niet ingelogd → een rond pilletje
-// "Inloggen" (met een klein rondje ervoor) dat het inlog/registreer-vak opent; wel ingelogd →
-// hetzelfde ronde pilletje maar dan met je naam (klik erop voor het potlood om 'm aan te
-// passen) en daarnaast een uitlog-knop.
-function renderTopbar(){
-  const rechts = state.account ? `
-    ${state.accountNaamBewerken ? `
-      <input id="topbar-naam-input" type="text" value="${state.account.username}" maxlength="${MAX_LETTERS_ACCOUNT_NAAM}" class="topbar__naam-input">
-      <button class="btn btn--flame btn--sm" data-action="account-naam-opslaan">Opslaan</button>
-      <button class="terug-link" data-action="account-naam-annuleren">Annuleren</button>
-    ` : `
-      <button type="button" class="topbar__pil" data-action="account-naam-menu-togglen" title="Klik voor opties">
-        <span class="topbar__pil-rondje">👤</span> ${state.account.username}
-      </button>
-      ${state.accountNaamMenuOpen ? `<button class="topbar__icon-btn" data-action="account-naam-bewerken" title="Naam wijzigen">✏️</button>` : ""}
-      <button class="btn btn--ghost btn--sm" data-action="account-uitloggen">Uitloggen</button>
-    `}
-  ` : `
-    <button type="button" class="topbar__pil" data-action="account-paneel-openen">
-      <span class="topbar__pil-rondje">🔐</span> Inloggen
-    </button>
-  `;
-  const paneel = (state.accountPaneelOpen && !state.account) ? `
-    <div class="form-card topbar__account-paneel">
-      <div class="account-paneel__tabs">
-        <button type="button" class="account-paneel__tab ${state.accountModus==='inloggen'?'account-paneel__tab--actief':''}" data-action="account-modus-inloggen">Inloggen</button>
-        <button type="button" class="account-paneel__tab ${state.accountModus==='registreren'?'account-paneel__tab--actief':''}" data-action="account-modus-registreren">Account maken</button>
-      </div>
-      ${state.accountModus === "registreren" ? `
-        <label class="form-card__label">Gebruikersnaam</label>
-        <input id="account-username" type="text" placeholder="Bijv. Sara" maxlength="${MAX_LETTERS_ACCOUNT_NAAM}">
-      ` : ""}
-      <label class="form-card__label">E-mailadres</label>
-      <input id="account-email" type="email" placeholder="jij@voorbeeld.nl">
-      <label class="form-card__label">Wachtwoord</label>
-      <input id="account-wachtwoord" type="password" placeholder="••••••••">
-      ${state.accountFoutmelding ? `<div class="fout">${state.accountFoutmelding}</div>` : ""}
-      <button class="btn btn--flame btn--block" data-action="${state.accountModus === "registreren" ? "account-registreren" : "account-inloggen"}">${state.accountModus === "registreren" ? "Account aanmaken" : "Inloggen"}</button>
-      <button class="terug-link" data-action="account-paneel-sluiten">← Sluiten</button>
-    </div>` : "";
-  return `
-    <div class="topbar">
-      <div class="topbar__merk">${MERKNAAM}</div>
-      <div class="topbar__account">${rechts}</div>
-    </div>
-    ${paneel}`;
-}
-function renderLanding(){
-  const topbar = renderTopbar();
-  const merk = `
-    <div class="landing__mark">
-      <div class="landing__eyebrow">Welkom bij</div>
-      <h1 class="landing__title">${MERKNAAM}</h1>
-      <div class="landing__divider"><span class="landing__diamond"></span></div>
-    </div>`;
-
-  if(state.landingScherm === "start"){
-    const siteUpdatesArr = Object.entries(state.siteUpdates || {})
-      .filter(([id]) => !state.gelezenUpdates.includes(id))
-      .sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0))
-      .slice(0,2);
-    const nieuwsHtml = siteUpdatesArr.length ? `
-      <div class="nieuws-teaser">
-        <div class="nieuws-teaser__titel">Nieuw in ${MERKNAAM}</div>
-        ${siteUpdatesArr.map(([id,u]) => `
-          <div class="nieuws-teaser__regel">
-            <span>${u.titel ? `<b>${u.titel}</b> — ` : ""}${u.tekst}</span>
-            <button type="button" class="nieuws-teaser__gelezen" data-action="update-gelezen" data-id="${id}" title="Verberg deze update op het startscherm">Gelezen ✕</button>
-          </div>`).join("")}
-      </div>` : "";
-
-    const gemaaktArr = state.mijnRestaurants.filter(r => r.type !== "gejoind");
-    const gejoindArr = state.mijnRestaurants.filter(r => r.type === "gejoind");
-    const restaurantKaart = r => `
-      <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" data-code="${r.code}" style="width:320px;">
-        <div class="choice-card__title">Verder naar ${r.naam}</div>
-        <p class="choice-card__desc">Code ${r.code} — ga er direct naartoe.</p>
-      </button>`;
-    // "Gemaakte restaurants" verschijnt alleen als je bent ingelogd (die restaurants horen bij
-    // je account) — ben je niet ingelogd, dan kun je alleen joinen, en zie je dus ook alleen de
-    // "Gejoinde restaurants"-groep terug.
-    const restaurantsHtml = (state.account ? gemaaktArr.length : 0) || gejoindArr.length ? `
-      ${(state.account && gemaaktArr.length) ? `
-        <div class="landing__restaurant-groep">
-          <div class="landing__restaurant-groep__titel">Gemaakte restaurants</div>
-          <div class="landing__mijn-restaurants">
-            ${gemaaktArr.map(restaurantKaart).join("")}
-          </div>
-        </div>` : ""}
-      ${gejoindArr.length ? `
-        <div class="landing__restaurant-groep">
-          <div class="landing__restaurant-groep__titel">Gejoinde restaurants</div>
-          <div class="landing__mijn-restaurants">
-            ${gejoindArr.map(restaurantKaart).join("")}
-          </div>
-        </div>` : ""}
-    ` : "";
-
-    const kanNogMaken = gemaaktArr.length < MAX_RESTAURANTS_GEMAAKT;
-    const keuzesHtml = `
-      <div class="landing__choices">
-        ${state.account ? `
-        <button class="choice-card" data-action="ga-maken">
-          <div class="choice-card__title">Restaurant maken</div>
-          <p class="choice-card__desc">Start een nieuw restaurant en krijg een unieke code om mee te delen met je team.</p>
-        </button>` : `
-        <button class="choice-card" data-action="account-paneel-openen">
-          <div class="choice-card__title">🔐 Log in om een restaurant te maken</div>
-          <p class="choice-card__desc">Zonder account kun je alleen joinen bij een bestaand restaurant met een code.</p>
-        </button>`}
-        <button class="choice-card" data-action="ga-joinen">
-          <div class="choice-card__title">Restaurant joinen</div>
-          <p class="choice-card__desc">Heb je al een code gekregen? Sluit je aan bij een bestaand restaurant — dit mag onbeperkt vaak.</p>
-        </button>
-      </div>`;
-
-    root.innerHTML = `
-      <div class="landing">
-        ${topbar}
-        ${merk}
-        <p class="landing__sub">Waar wilt u naartoe?</p>
-        ${restaurantsHtml}
-        ${keuzesHtml}
-        ${nieuwsHtml}
-        <div class="landing__choices" style="margin-top:14px;">
-          <button class="choice-card" data-action="ga-feedback">
-            <div class="choice-card__title">💬 Bericht naar sitebeheer</div>
-            <p class="choice-card__desc">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
-          </button>
-        </div>
-        <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
-      </div>`;
-    accountFormListenersKoppelen();
-  } else if(state.landingScherm === "maken"){
-    root.innerHTML = `
-      <div class="landing">
-        ${topbar}
-        ${merk}
-        <div class="form-card">
-          <label class="form-card__label">Naam van je restaurant</label>
-          <input id="input-naam" type="text" placeholder="Bijv. GoudenPan" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" autofocus>
-          <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>
-          ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
-          <button class="btn btn--flame btn--block" data-action="maak-restaurant">Restaurant aanmaken</button>
-          <button class="terug-link" data-action="terug-landing">← Terug</button>
-        </div>
-      </div>`;
-    const verstuurMaken = () => restaurantMaken(
-      document.getElementById("input-naam").value,
-      state.siteGebruikersNaam
-    );
-    document.getElementById("input-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuurMaken(); });
-    accountFormListenersKoppelen();
-  } else if(state.landingScherm === "joinen"){
-    root.innerHTML = `
-      <div class="landing">
-        ${topbar}
-        ${merk}
-        <div class="form-card">
-          <label class="form-card__label">Restaurantcode</label>
-          <input id="input-code" type="text" placeholder="Bijv. K3F7Q" autofocus style="text-transform:uppercase; letter-spacing:.1em;">
-          ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
-          <button class="btn btn--flame btn--block" data-action="join-restaurant">Restaurant joinen</button>
-          <button class="terug-link" data-action="terug-landing">← Terug</button>
-        </div>
-      </div>`;
-    const verstuurJoinen = () => restaurantJoinen(
-      document.getElementById("input-code").value,
-      state.siteGebruikersNaam
-    );
-    document.getElementById("input-code").addEventListener("keydown", e => { if(e.key === "Enter") verstuurJoinen(); });
-    accountFormListenersKoppelen();
-  } else if(state.landingScherm === "feedback"){
-    root.innerHTML = `
-      <div class="landing">
-        ${topbar}
-        ${merk}
-        <div class="form-card">
-          <label class="form-card__label">Bericht naar sitebeheer</label>
-          <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
-          <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
-          <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen">Versturen</button>
-          <button class="terug-link" data-action="terug-landing">← Terug</button>
-        </div>
-      </div>`;
-    accountFormListenersKoppelen();
-  }
-}
-// Koppelt Enter-toetsen in het inlog/registreer-vak en het naam-bewerk-veldje van de topbar —
-// wordt na elke render van een landingscherm aangeroepen (het vak kan op elk landingscherm
-// open staan, dus dit staat los van welk sub-scherm er verder getoond wordt).
-function accountFormListenersKoppelen(){
-  const naamInput = document.getElementById("topbar-naam-input");
-  if(naamInput) naamInput.addEventListener("keydown", e => { if(e.key === "Enter") accountNaamOpslaan(naamInput.value); });
-  const emailInput = document.getElementById("account-email");
-  const wachtwoordInput = document.getElementById("account-wachtwoord");
-  const usernameInput = document.getElementById("account-username");
-  if(!emailInput || !wachtwoordInput) return;
-  const verstuur = () => state.accountModus === "registreren"
-    ? accountRegistreren(usernameInput ? usernameInput.value : "", emailInput.value, wachtwoordInput.value)
-    : accountInloggen(emailInput.value, wachtwoordInput.value);
-  emailInput.addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
-  wachtwoordInput.addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
-  if(usernameInput) usernameInput.addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
-}
-
-// ============================================================
-// SITEBEHEER (wachtwoord-vak voor de eigenaar van de website)
-// ============================================================
-function renderBeheerPaneel(){
-  if(!state.beheerderActief){
-    const minutenOver = beheerMinutenTotOntgrendeld();
-    const geblokkeerd = minutenOver > 0;
-    root.innerHTML = `
-      <div class="landing">
-        <div class="landing__mark">
-          <div class="landing__eyebrow">${MERKNAAM}</div>
-          <h1 class="landing__title">Sitebeheer</h1>
-          <div class="landing__divider"><span class="landing__diamond"></span></div>
-        </div>
-        <div class="form-card">
-          <label class="form-card__label">E-mailadres</label>
-          <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":"autofocus"}>
-          <label class="form-card__label">Wachtwoord</label>
-          <input id="beheer-wachtwoord" type="password" placeholder="••••••••" ${geblokkeerd?"disabled":""}>
-          ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : geblokkeerd ? `<div class="fout">Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.</div>` : ""}
-          <button class="btn btn--flame btn--block" data-action="beheer-inloggen" ${geblokkeerd?"disabled":""}>Inloggen</button>
-          <button class="terug-link" data-action="beheer-sluiten">← Terug</button>
-        </div>
-      </div>`;
-    if(geblokkeerd) return;
-    const verstuur = () => beheerInloggen(
-      state.siteGebruikersNaam,
-      document.getElementById("beheer-email").value,
-      document.getElementById("beheer-wachtwoord").value
-    );
-    document.getElementById("beheer-email").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
-    document.getElementById("beheer-wachtwoord").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
-    return;
-  }
-
-  const restaurantsArr = Object.entries(state.alleRestaurants || {}).sort((a,b) => (b[1].aangemaakt||0)-(a[1].aangemaakt||0));
-  const restaurantsHtml = !state.alleRestaurantsGeladen ? `<div class="leeg">Restaurants laden…</div>`
-    : restaurantsArr.length === 0 ? `<div class="leeg">Nog geen restaurants aangemaakt.</div>`
-    : restaurantsArr.map(([code, r]) => {
-        const ledenArr = Object.entries(r.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
-        const eigenarenArr = ledenArr.filter(([,l]) => l.eigenaar);
-        const overigeLeden = ledenArr.filter(([,l]) => !l.eigenaar);
-        const aantalLeden = ledenArr.length;
-        const aantalProducten = Object.keys(r.menu || {}).length;
-        const aantalOpenstaand = Object.keys(r.bestellingen || {}).length;
-        const aantalHistorie = Object.keys(r.historie || {}).length;
-        const datum = r.aangemaakt ? new Date(r.aangemaakt).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "";
-        const wTijd = r.waarschuwing && r.waarschuwing.tijdstip ? new Date(r.waarschuwing.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-        return `
-        <div class="beheer-rest-rij">
-          <div class="beheer-rest-rij__info">
-            <div class="beheer-rest-rij__naam">${r.naam || "(zonder naam)"} <span class="team-rij__badge">${code}</span></div>
-            <div class="beheer-rest-rij__meta">
-              ${aantalLeden} teamlid${aantalLeden===1?"":"en"} · ${aantalProducten} product${aantalProducten===1?"":"en"} ·
-              ${aantalOpenstaand} openstaande bestelling${aantalOpenstaand===1?"":"en"} · ${aantalHistorie} in historie
-              ${datum ? ` · aangemaakt ${datum}` : ""}
-              · naamlimiet ${r.naamLimiet ? `${r.naamLimiet} letters` : `standaard (${MAX_LETTERS_RESTAURANTNAAM})`}
-            </div>
-            <div class="beheer-rest-rij__leden">
-              ${eigenarenArr.length ? `<span class="beheer-rest-rij__eigenaar">${eigenarenArr.map(([,l]) => `👤 ${l.naam}`).join(" · ")}<span class="team-rij__badge" style="margin-left:6px;">${eigenarenArr.length > 1 ? "Eigenaren" : "Eigenaar"}</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
-              ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">
-                Team: ${overigeLeden.map(([lid_id,l]) =>
-                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-toevoegen" data-restaurant="${code}" data-id="${lid_id}" title="${l.naam} toevoegen als (mede-)eigenaar">+</button> <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-overzetten" data-restaurant="${code}" data-id="${lid_id}" title="Eigenaarschap volledig overzetten naar ${l.naam}">⇄</button>`
-                ).join(" · ")}
-              </span>` : ""}
-            </div>
-            ${r.waarschuwing ? `
-              <div class="beheer-rest-rij__waarschuwing">
-                ⚠ ${r.waarschuwing.tekst} <span class="beheer-rest-rij__waarschuwing-tijd">${wTijd ? "· verstuurd " + wTijd : ""}</span>
-                <button class="verwijder-x" data-action="beheer-waarschuwing-intrekken" data-id="${code}" title="Waarschuwing intrekken">✕</button>
-              </div>` : ""}
-          </div>
-          <div class="beheer-rest-rij__acties">
-            <button class="btn btn--steel btn--sm" data-action="beheer-bezoeken" data-id="${code}">Bezoeken</button>
-            <button class="btn btn--ghost btn--sm" data-action="beheer-naamlimiet" data-id="${code}">Naamlimiet</button>
-            <button class="btn btn--ghost btn--sm" data-action="beheer-waarschuwen" data-id="${code}">${r.waarschuwing ? "Waarschuwing aanpassen" : "Waarschuwen"}</button>
-            <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-verwijderen" data-id="${code}">Verwijderen</button>
-          </div>
-        </div>`;
-      }).join("");
-
-  const gebruikersArr = Object.entries(state.gebruikersLijst || {}).sort((a,b) => (b[1].laatsteBezoek||0)-(a[1].laatsteBezoek||0));
-  const gebruikersHtml = !state.gebruikersLijstGeladen ? `<div class="leeg">Gebruikers laden…</div>`
-    : gebruikersArr.length === 0 ? `<div class="leeg">Nog niemand heeft een naam ingevuld.</div>`
-    : gebruikersArr.map(([apparaatId, g]) => {
-        const ban = state.bansLijst[apparaatId];
-        const oneindig = ban && typeof ban.totEnMet !== "number";
-        const nogActief = ban && (oneindig || ban.totEnMet > Date.now());
-        const eersteDatum = g.eersteBezoek ? new Date(g.eersteBezoek).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric"}) : "?";
-        const laatsteDatum = g.laatsteBezoek ? new Date(g.laatsteBezoek).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "?";
-        const statusHtml = nogActief
-          ? `<span class="team-rij__badge" style="border-color:var(--ember); color:var(--ember);">${oneindig ? "Geblokkeerd · oneindig" : "Geblokkeerd tot " + new Date(ban.totEnMet).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>`
-          : ban ? `<span class="team-rij__badge">Blokkade verlopen</span>` : "";
-        // Berichten (bezwaar/appeal) horen bij de blokkade zelf, dus alleen relevant als er
-        // ooit een blokkade is geweest.
-        const berichtenArr = Object.entries((ban && ban.berichten) || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
-        const chatOpen = state.beheerBanChatOpenId === apparaatId;
-        const chatToggleHtml = ban ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-chat-togglen" data-id="${apparaatId}">💬 Bericht${berichtenArr.length ? ` (${berichtenArr.length})` : ""}</button>` : "";
-        const berichtenGeblokkeerd = !!(ban && ban.berichtenGeblokkeerd);
-        const chatPaneelHtml = chatOpen ? `
-          <div class="ban-chat ban-chat--beheer">
-            ${berichtenArr.length ? berichtenArr.map(([id,b]) => `
-              <div class="ban-chat__bericht ban-chat__bericht--${b.van==='beheer'?'beheer':'gebruiker'}">
-                <div class="ban-chat__afzender">${b.van==='beheer' ? 'Jij (sitebeheer)' : (g.naam || '(onbekend)')}</div>
-                <div class="ban-chat__tekst">${b.tekst}</div>
-              </div>`).join("") : `<div class="leeg" style="padding:6px 0;">Nog geen berichten.</div>`}
-            <textarea id="beheer-ban-bericht-tekst-${apparaatId}" rows="2" placeholder="Antwoord versturen…" style="width:100%; resize:vertical; font-family:inherit; font-size:.85rem; padding:8px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:8px;"></textarea>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
-              <button class="btn btn--flame btn--sm" data-action="beheer-ban-bericht-versturen" data-id="${apparaatId}">Versturen</button>
-              ${berichtenGeblokkeerd
-                ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-berichten-deblokkeren" data-id="${apparaatId}">Berichtenfunctie weer aanzetten</button>`
-                : `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-berichten-blokkeren" data-id="${apparaatId}">Berichtenfunctie uitzetten</button>`}
-              ${berichtenArr.length ? `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-chat-verwijderen" data-id="${apparaatId}">Gesprek verwijderen</button>` : ""}
-            </div>
-            ${berichtenGeblokkeerd ? `<p style="color:var(--ember); font-size:.75rem; margin-top:6px;">Deze gebruiker kan momenteel geen berichten meer sturen.</p>` : ""}
-          </div>` : "";
-        return `
-        <div class="beheer-rest-rij" style="flex-direction:column; align-items:stretch;">
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
-            <div class="beheer-rest-rij__info">
-              <div class="beheer-rest-rij__naam">${g.naam || "(onbekend)"} ${statusHtml}</div>
-              <div class="beheer-rest-rij__meta">Eerste bezoek ${eersteDatum} · laatst gezien ${laatsteDatum}</div>
-            </div>
-            <div class="beheer-rest-rij__acties">
-              ${chatToggleHtml}
-              ${nogActief
-                ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
-                : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${apparaatId}">Timeout (minuten)</button>
-                   <button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
-                   <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${apparaatId}">Blokkeer oneindig</button>`}
-            </div>
-          </div>
-          ${chatPaneelHtml}
-        </div>`;
-      }).join("");
-
-  const siteUpdatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const siteUpdatesHtml = siteUpdatesArr.length ? siteUpdatesArr.map(([id,u]) => {
-    const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-    if(state.bewerkSiteUpdateId === id){
-      return `<li class="update-lijst__bewerk-rij">
-        <input id="site-update-bewerk-titel-${id}" placeholder="Titel (optioneel)" value="${u.titel||""}">
-        <div class="update-form__row">
-          <input id="site-update-bewerk-tekst-${id}" placeholder="Wat is er veranderd?" value="${u.tekst||""}">
-          <button class="btn btn--flame btn--sm" data-action="site-update-opslaan" data-id="${id}">Opslaan</button>
-          <button class="btn btn--ghost btn--sm" data-action="site-update-bewerk-annuleren" data-id="${id}">Annuleren</button>
-        </div>
-      </li>`;
-    }
-    return `<li>
-      <div>
-        <span class="update-lijst__datum">${datum}</span>
-        ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
-        <span>${u.tekst}</span>
-      </div>
-      <div class="update-lijst__acties">
-        <button class="verwijder-x" data-action="site-update-bewerken" data-id="${id}" title="Bewerken">✎</button>
-        <button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}" title="Verwijderen">✕</button>
-      </div>
-    </li>`;
-  }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
-
-  const feedbackArr = Object.entries(state.feedback || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const feedbackHtml = feedbackArr.length ? feedbackArr.map(([id,f]) => {
-    const datum = f.tijdstip ? new Date(f.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-    return `<li>
-      <div>
-        <span class="update-lijst__datum">${datum}</span>
-        <span class="update-lijst__titel">${f.afzender || "(onbekend)"}${f.restaurantNaam ? ` — ${f.restaurantNaam} (${f.restaurantCode || "?"})` : ""}</span>
-        <span>${f.tekst}</span>
-      </div>
-      <button class="verwijder-x" data-action="feedback-verwijderen" data-id="${id}" title="Verwerkt, wegklikken">✕</button>
-    </li>`;
-  }).join("") : `<div class="leeg">Nog geen berichten van eigenaren ontvangen.</div>`;
-
-  const pogingenArr = Object.entries(state.sitebeheerPogingen || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const pogingenHtml = pogingenArr.length ? pogingenArr.map(([id,p]) => {
-    const datum = p.tijdstip ? new Date(p.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-    return `<li>
-      <div>
-        <span class="update-lijst__datum">${datum}</span>
-        <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — <strong>${p.naam || "(geen naam ingevuld)"}</strong> (${p.email || "(leeg)"})</span>
-      </div>
-      <button class="verwijder-x" data-action="poging-verwijder" data-id="${id}" title="Wegklikken">✕</button>
-    </li>`;
-  }).join("") : `<div class="leeg">Nog geen inlogpogingen geregistreerd.</div>`;
-
-  root.innerHTML = `
-    <div class="shell">
-      <header class="topbar">
-        <div class="topbar__id">
-          <div class="topbar__naam">🔒 Sitebeheer</div>
-        </div>
-        <div style="display:flex; gap:14px; align-items:center;">
-          <button class="terug-link" style="margin:0;" data-action="beheer-uitloggen">Uitloggen</button>
-          <button class="terug-link" style="margin:0;" data-action="beheer-sluiten">← Terug naar ${MERKNAAM}</button>
-        </div>
-      </header>
-      <main class="view">
-        <h2 class="view-titel">Alle restaurants</h2>
-        <div class="instel-blok">
-          <div class="beheer-rest-lijst">${restaurantsHtml}</div>
-        </div>
-
-        <h2 class="view-titel">👥 Gebruikers & blokkades</h2>
-        <div class="instel-blok">
-          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Iedereen die ooit een naam heeft ingevuld op het startscherm. Een blokkade is gekoppeld aan het apparaat, dus een andere naam invullen helpt niet om 'm te omzeilen.</p>
-          <div class="beheer-rest-lijst">${gebruikersHtml}</div>
-        </div>
-
-        <h2 class="view-titel">💬 Feedback van eigenaren</h2>
-        <div class="instel-blok">
-          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Berichten die restaurant-eigenaren rechtstreeks vanuit hun Instellingen naar jou hebben verstuurd.</p>
-          <ul class="update-lijst">${feedbackHtml}</ul>
-        </div>
-
-        <h2 class="view-titel">🔐 Inlogpogingen</h2>
-        <div class="instel-blok">
-          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">De laatste 50 pogingen om bij Sitebeheer in te loggen — zo zie je hier ook mislukte pogingen van anderen. Na ${BEHEER_MAX_POGINGEN} mislukte pogingen achter elkaar wordt inloggen op dat apparaat ${BEHEER_LOCKOUT_MINUTEN} minuten geblokkeerd.</p>
-          <ul class="update-lijst">${pogingenHtml}</ul>
-        </div>
-
-        <h2 class="view-titel">Systeemupdates</h2>
-        <div class="instel-blok">
-          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Zichtbaar voor iedereen die ${MERKNAAM} gebruikt.</p>
-          <div class="update-form">
-            <input id="site-update-titel" placeholder="Titel (optioneel)">
-            <div class="update-form__row">
-              <input id="site-update-tekst" placeholder="Wat is er veranderd?">
-              <button class="btn btn--flame" data-action="site-update-toevoegen">Plaatsen</button>
-            </div>
-          </div>
-          <ul class="update-lijst">${siteUpdatesHtml}</ul>
-        </div>
-      </main>
-    </div>`;
-}
-
-function renderDashboard(){
-  const bestellingenArr = Object.entries(state.bestellingen || {});
-  const aantalNieuw = bestellingenArr.filter(([,b]) => b.status === "nieuw").length;
-  const aantalKlaar = bestellingenArr.filter(([,b]) => b.status === "klaar").length;
-
-  // Alleen tabbladen tonen waar dit teamlid rechten voor heeft; Instellingen is altijd zichtbaar
-  // (code bekijken / restaurant verlaten kan iedereen).
-  const tabsConfig = [
-    { key:"bestellen", label:"Bestellen 🛒" },
-    { key:"keuken", label:`Keuken 🍳 ${aantalNieuw?`<span class="badge">${aantalNieuw}</span>`:""}` },
-    { key:"bezorgen", label:`Bezorgen 🚚 ${aantalKlaar?`<span class="badge">${aantalKlaar}</span>`:""}` },
-    { key:"historie", label:"Historie 🕓" },
-  ].filter(t => heeftRecht(t.key));
-  if(heeftRecht('instellingen')) tabsConfig.push({ key:"voorraad", label:"Voorraad 📦" });
-  // Chat is altijd zichtbaar voor elk teamlid — dit tabblad is bewust niet aan een recht
-  // gekoppeld, alleen aan de losse chatGeblokkeerd-vlag die de eigenaar per teamlid kan zetten.
-  tabsConfig.push({ key:"chat", label:"Chat 💬" });
-  tabsConfig.push({ key:"instellingen", label:"Instellingen ⚙️" });
-
-  if(!tabsConfig.some(t => t.key === state.huidigeView)){
-    state.huidigeView = tabsConfig[0].key;
-  }
-
-  const tabsHtml = tabsConfig.map(t =>
-    `<button class="tab ${state.huidigeView===t.key?'actief':''}" data-action="wissel-view" data-view="${t.key}">${t.label}</button>`
-  ).join("");
-
-  root.innerHTML = `
-    <div class="shell">
-      <header class="topbar">
-        <div class="topbar__id">
-          <div class="topbar__naam">${state.restaurantNaam}</div>
-          <button class="topbar__code" data-action="kopieer-code" title="Klik om code te kopiëren">${state.restaurantCode}</button>
-          ${state.beheerBezoekModus ? `<span class="beheer-badge">🔒 Beheerder-weergave</span>` : ""}
-        </div>
-        <div style="display:flex; gap:14px; align-items:center;">
-          ${state.beheerBezoekModus ? `<button class="terug-link" style="margin:0;" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>` : `<button class="terug-link" style="margin:0;" data-action="terug-naar-start">🔀 Wissel restaurant</button>`}
-          ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
-        </div>
-      </header>
-      ${state.waarschuwing ? `
-      <div class="waarschuwing-banner">
-        <span class="waarschuwing-banner__icoon">⚠</span>
-        <span class="waarschuwing-banner__tekst"><b>Bericht van sitebeheer:</b> ${state.waarschuwing.tekst}</span>
-        <button class="waarschuwing-banner__sluiten" data-action="waarschuwing-sluiten" title="Sluiten">✕</button>
-      </div>` : ""}
-      <nav class="tabs">${tabsHtml}</nav>
-      <main class="view" id="view-inhoud"></main>
-    </div>`;
-
-  const inhoud = document.getElementById("view-inhoud");
-  if(state.huidigeView === "bestellen") inhoud.innerHTML = renderBestellen();
-  else if(state.huidigeView === "keuken") inhoud.innerHTML = renderKeuken();
-  else if(state.huidigeView === "bezorgen") inhoud.innerHTML = renderBezorgen();
-  else if(state.huidigeView === "historie") inhoud.innerHTML = renderHistorie();
-  else if(state.huidigeView === "voorraad") inhoud.innerHTML = renderVoorraad();
-  else if(state.huidigeView === "chat") inhoud.innerHTML = renderChat();
-  else if(state.huidigeView === "instellingen") inhoud.innerHTML = renderInstellingen();
-}
-
-function renderBestellen(){
-  const heeftPlattegrond = Object.values(state.plattegrond || {}).some(c => c.type === "tafel");
-  if(heeftPlattegrond && state.bestelModus === "plattegrond"){
-    return renderBestellenPlattegrond();
-  }
-  return renderBestellenProducten();
-}
-
-// Toont de plattegrond als eerste stap van Bestellen: klik op een tafel om ervoor te bestellen.
-function renderBestellenPlattegrond(){
-  const RIJEN = 7, KOLOMMEN = 12;
-  let cellenHtml = "";
-  for(let r=0;r<RIJEN;r++){
-    for(let c=0;c<KOLOMMEN;c++){
-      const key = r + "-" + c;
-      const obj = (state.plattegrond || {})[key];
-      if(!obj){
-        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--leeg"></div>`;
-      } else if(obj.type === "stoel"){
-        cellenHtml += `<div class="plattegrond__cel plattegrond__cel--stoel" title="Stoel">${stoelIconHtml(obj.rotatie)}</div>`;
-      } else {
-        const bezet = !!obj.bezet;
-        cellenHtml += `
-          <button type="button" class="plattegrond__cel plattegrond__cel--tafel ${bezet?'plattegrond__cel--bezet':'plattegrond__cel--vrij'}"
-            data-action="bestel-tafel-kiezen" data-cel="${key}" title="Tafel ${obj.nummer||''} — ${bezet?'bezet':'vrij'}">
-            🍽️<span class="plattegrond__nr">${obj.nummer||''}</span>
-          </button>`;
-      }
-    }
-  }
-
-  return `
-    <h2 class="view-titel">Bestellen 🛒</h2>
-    <p class="plattegrond-uitleg">Klik op een tafel om er een bestelling voor te plaatsen.</p>
-    <div class="plattegrond-legenda">
-      <span><span class="legenda-stip legenda-stip--vrij"></span>Vrij</span>
-      <span><span class="legenda-stip legenda-stip--bezet"></span>Bezet</span>
-    </div>
-    <div class="plattegrond-wrap">
-      <div class="plattegrond-grid" style="grid-template-columns:repeat(${KOLOMMEN}, 1fr);">${cellenHtml}</div>
-    </div>
-    <button class="btn btn--ghost" style="margin-top:18px;" data-action="bestel-zonder-tafel">Bestelling zonder tafel</button>`;
-}
-
-function renderBestellenProducten(){
-  const menuArr = Object.entries(state.menu || {});
-  const categorieVolgorde = categorieenGesorteerd().map(([,c]) => c.naam);
-  const gebruikteCategorieen = [...new Set(menuArr.map(([,i]) => i.categorie || "Overig"))];
-  const categorieen = [
-    ...categorieVolgorde.filter(cat => gebruikteCategorieen.includes(cat)),
-    ...gebruikteCategorieen.filter(cat => !categorieVolgorde.includes(cat)),
-  ];
-
-  let productenHtml = "";
-  if(menuArr.length === 0){
-    productenHtml = `<div class="leeg">Nog geen producten. Voeg ze toe via Instellingen.</div>`;
-  } else {
-    categorieen.forEach(cat => {
-      productenHtml += `<div class="categorie-titel">${cat}</div><div class="product-grid">`;
-      menuArr.filter(([,i]) => (i.categorie||"Overig") === cat).forEach(([id,i]) => {
-        const uitverkocht = !!i.uitverkocht;
-        const opties = [];
-        if(i.ijsKeuze) opties.push("🧊");
-        if(i.slagroomKeuze) opties.push("🥛");
-        if(i.glasKeuze) opties.push("🥂");
-        productenHtml += `
-          <button class="product-card ${uitverkocht?'product-card--uitverkocht':''}" ${uitverkocht?'disabled':'data-action="toevoegen-wagen"'} data-id="${id}">
-            ${uitverkocht ? `<span class="product-card__uitverkocht-badge">Uitverkocht</span>` : `<span class="product-card__plus">+</span>`}
-            <div class="product-card__emoji">${i.emoji||"🍽️"}</div>
-            <div class="product-card__naam">${i.naam}${opties.length?` <span class="product-card__opties">${opties.join(" ")}</span>`:""}</div>
-            <div class="product-card__prijs">${euro(i.prijs)}</div>
-          </button>`;
-      });
-      productenHtml += `</div>`;
-    });
-  }
-
-  const wagenItems = Object.entries(state.winkelwagen);
-  const totaal = wagenItems.reduce((s,[,i]) => s + i.prijs*i.aantal, 0);
-  let wagenHtml = `<div class="leeg" style="padding:24px 12px;">Nog niets geselecteerd.</div>`;
-  if(wagenItems.length){
-    wagenHtml = wagenItems.map(([id,i]) => `
-      <div class="wagen__regel">
-        <div class="wagen__regel-top">
-          <div class="wagen__regel-naam">${i.emoji?i.emoji+" ":""}${i.naam}</div>
-          <div class="wagen__aantal">
-            <button data-action="wagen-min" data-id="${id}">−</button>
-            <span>${i.aantal}</span>
-            <button data-action="wagen-plus" data-id="${id}">+</button>
-          </div>
-        </div>
-        ${i.ijsKeuze ? `
-          <label class="wagen__checkbox">
-            <input type="checkbox" data-action="wagen-ijs" data-id="${id}" ${i.ijs?"checked":""}>
-            🧊 Met ijs
-          </label>` : ""}
-        ${i.slagroomKeuze ? `
-          <label class="wagen__checkbox">
-            <input type="checkbox" data-action="wagen-slagroom" data-id="${id}" ${i.slagroom?"checked":""}>
-            🥛 Met slagroom
-          </label>` : ""}
-        ${i.glasKeuze ? `
-          <label class="wagen__checkbox">
-            <input type="checkbox" data-action="wagen-glas" data-id="${id}" ${i.glas?"checked":""}>
-            🥂 Heeft al een glas
-          </label>` : ""}
-        <input class="wagen__notitie" placeholder="Notitie, bijv. 'geen ui'" value="${i.notitie||""}" data-action="wagen-notitie" data-id="${id}">
-        <button class="wagen__verwijder" data-action="wagen-verwijder" data-id="${id}">verwijderen</button>
-      </div>`).join("");
-  }
-
-  const heeftPlattegrond = Object.values(state.plattegrond || {}).some(c => c.type === "tafel");
-  const actieveCel = state.actieveTafelCel ? (state.plattegrond || {})[state.actieveTafelCel] : null;
-
-  return `
-    <div class="bestel-layout">
-      <div>
-        <h2 class="view-titel">Bestellen 🛒</h2>
-        ${productenHtml}
-      </div>
-      <div class="wagen">
-        <div class="wagen__titel">Bestelling</div>
-        ${heeftPlattegrond ? `<button type="button" class="terug-link" data-action="bestel-terug-plattegrond">← Terug naar plattegrond</button>` : ""}
-        ${state.actieveTafelCel ? `
-          <div class="wagen__tafel-label">
-            🍽️ Tafel ${actieveCel ? actieveCel.nummer : ""}
-            ${actieveCel && actieveCel.bezet ? `<span class="tafel-status tafel-status--bezet">bezet</span>` : `<span class="tafel-status tafel-status--vrij">nog vrij</span>`}
-          </div>
-        ` : `<input class="wagen__tafel" placeholder="Tafel / naam (optioneel)" value="${state.tafel}" data-action="tafel-invoer">`}
-        ${wagenHtml}
-        <div class="wagen__totaal"><span>Totaal</span><span>${euro(totaal)}</span></div>
-        <button class="btn btn--flame btn--block" data-action="verzend-bestelling" ${wagenItems.length?"":"disabled"}>Bestelling verzenden</button>
-        ${state.actieveTafelCel && actieveCel && actieveCel.bezet ? `
-          <button type="button" class="btn btn--steel btn--block" style="margin-top:10px;" data-action="tafel-betaald">Tafel betaald — vrijgeven</button>
-        ` : ""}
-      </div>
-    </div>`;
-}
-
-function ticketHtml(id, b, kolom){
-  const items = (b.items||[]).map(it => `
-    <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
-      ${itemExtraHtml(it)}
-    </li>`).join("");
-  const tijd = b.aangemaakt ? new Date(b.aangemaakt).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}) : "";
-
-  let acties = "";
-  if(kolom === "nieuw"){
-    acties = `<button class="btn btn--steel btn--sm" style="flex:1" data-action="start-bereiden" data-id="${id}">Bereiden</button>`;
-  } else if(kolom === "bereiden"){
-    acties = `<button class="btn btn--fresh btn--sm" style="flex:1" data-action="bereiden-klaar" data-id="${id}">Bereiden klaar</button>`;
-  } else if(kolom === "klaar"){
-    acties = `<button class="btn btn--flame btn--sm" style="flex:1" data-action="markeer-bezorgd" data-id="${id}">Bezorgd</button>`;
-  }
-
-  return `
-    <div class="ticket">
-      <div class="ticket__top">
-        <div class="ticket__nr">#${id.slice(-5).toUpperCase()}</div>
-        <div class="ticket__tijd">${tijd}</div>
-      </div>
-      ${b.tafel ? `<div class="ticket__tafel">${b.tafel}</div>` : ""}
-      <ul class="ticket__items">${items}</ul>
-      <div class="ticket__acties">${acties}</div>
-    </div>`;
-}
-
-function renderKeuken(){
-  const alle = Object.entries(state.bestellingen || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
-  const nieuw = alle.filter(([,b]) => b.status === "nieuw");
-  const bereiden = alle.filter(([,b]) => b.status === "bereiden");
-
-  return `
-    <h2 class="view-titel">Keuken 🍳</h2>
-    <div class="ticket-kolommen">
-      <div>
-        <div class="ticket-kolom__titel"><span class="stip stip--nieuw"></span>Nieuw (${nieuw.length})</div>
-        <div class="ticket-stack">
-          ${nieuw.length ? nieuw.map(([id,b]) => ticketHtml(id,b,"nieuw")).join("") : `<div class="leeg">Geen nieuwe bestellingen.</div>`}
-        </div>
-      </div>
-      <div>
-        <div class="ticket-kolom__titel"><span class="stip stip--bereiden"></span>In bereiding (${bereiden.length})</div>
-        <div class="ticket-stack">
-          ${bereiden.length ? bereiden.map(([id,b]) => ticketHtml(id,b,"bereiden")).join("") : `<div class="leeg">Nog niets in bereiding.</div>`}
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderBezorgen(){
-  const klaar = Object.entries(state.bestellingen || {})
-    .filter(([,b]) => b.status === "klaar")
-    .sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
-
-  return `
-    <h2 class="view-titel">Bezorgen 🚚</h2>
-    <div class="ticket-kolommen">
-      <div style="grid-column:1/-1; max-width:420px;">
-        <div class="ticket-kolom__titel"><span class="stip stip--klaar"></span>Klaar om te bezorgen (${klaar.length})</div>
-        <div class="ticket-stack">
-          ${klaar.length ? klaar.map(([id,b]) => ticketHtml(id,b,"klaar")).join("") : `<div class="leeg">Niets klaar om te bezorgen.</div>`}
-        </div>
-      </div>
-    </div>`;
-}
-
-function renderHistorie(){
-  const historieArr = Object.entries(state.historie || {})
-    .sort((a,b) => (b[1].bezorgd||b[1].aangemaakt||0) - (a[1].bezorgd||a[1].aangemaakt||0));
-
-  const tellingen = {};
-  historieArr.forEach(([,b]) => {
-    (b.items||[]).forEach(it => {
-      const cat = it.categorie || "Overig";
-      tellingen[cat] = (tellingen[cat]||0) + (it.aantal||0);
-    });
-  });
-  const tellingenArr = Object.entries(tellingen).sort((a,b) => b[1]-a[1]);
-
-  const tabelHtml = tellingenArr.length ? `
-    <table class="historie-tabel">
-      <thead><tr><th>Categorie</th><th>Aantal besteld</th></tr></thead>
-      <tbody>
-        ${tellingenArr.map(([cat,aantal]) => `<tr><td>${cat}</td><td>${aantal}×</td></tr>`).join("")}
-      </tbody>
-    </table>` : `<div class="leeg">Nog geen geschiedenis om te tellen.</div>`;
-
-  const lijstHtml = historieArr.map(([id,b]) => {
-    const tijd = b.bezorgd ? new Date(b.bezorgd).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-    const items = (b.items||[]).map(it => `
-      <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
-        ${itemExtraHtml(it)}
-      </li>`).join("");
-    return `
-      <div class="ticket">
-        <div class="ticket__top">
-          <div class="ticket__nr">#${id.slice(-5).toUpperCase()}</div>
-          <div class="ticket__tijd">${tijd}</div>
-          <button class="ticket__verwijder" data-action="historie-verwijder" data-id="${id}" title="Bestelling verwijderen">✕</button>
-        </div>
-        ${b.tafel ? `<div class="ticket__tafel">${b.tafel}</div>` : ""}
-        <ul class="ticket__items">${items}</ul>
-      </div>`;
-  }).join("");
-
-  return `
-    <h2 class="view-titel">Historie 🕓</h2>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Bestellingen per categorie</div>
-      ${tabelHtml}
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel" style="display:flex; justify-content:space-between; align-items:center;">
-        <span>Alle bezorgde bestellingen (${historieArr.length})</span>
-        ${historieArr.length ? `<button class="btn btn--ghost btn--sm" data-action="historie-wissen">Hele historie wissen</button>` : ""}
-      </div>
-      <div class="ticket-stack">
-        ${lijstHtml || `<div class="leeg">Nog geen bezorgde bestellingen.</div>`}
-      </div>
-    </div>`;
-}
-
-// ============================================================
-// INSTELLINGEN — met subnavigatie: Algemeen / Producten / Achtergrond / Plattegrond
-// ============================================================
-const THEMA_PRESETS = [
-  { naam:"Kastanje",   achtergrond:"#150f0b", tekst:"#f3ead9" },
-  { naam:"Middernacht", achtergrond:"#0d1420", tekst:"#e8eef7" },
-  { naam:"Olijf",      achtergrond:"#1b2016", tekst:"#eef2e6" },
-  { naam:"Bordeaux",   achtergrond:"#1f0d12", tekst:"#f5e6ea" },
-  { naam:"Grafiet",    achtergrond:"#161616", tekst:"#f1f1f1" },
-  { naam:"Crème",      achtergrond:"#f2ead9", tekst:"#241a12" },
-];
-
-function renderInstellingen(){
-  const subtabs = [{ key:"algemeen", label:"Algemeen" }];
-  if(heeftRecht('instellingen')) subtabs.push({ key:"producten", label:"Producten" });
-  if(heeftRecht('instellingen')) subtabs.push({ key:"achtergrond", label:"Achtergrond" });
-  if(heeftRecht('instellingen')) subtabs.push({ key:"plattegrond", label:"Plattegrond" });
-
-  if(!subtabs.some(t => t.key === state.instellingenTab)) state.instellingenTab = subtabs[0].key;
-
-  const subnavHtml = subtabs.map(t =>
-    `<button class="subtab ${state.instellingenTab===t.key?'actief':''}" data-action="instellingen-subtab" data-tab="${t.key}">${t.label}</button>`
-  ).join("");
-
-  let inhoudHtml = "";
-  if(state.instellingenTab === "algemeen") inhoudHtml = renderInstellingenAlgemeen();
-  else if(state.instellingenTab === "producten") inhoudHtml = renderInstellingenProducten();
-  else if(state.instellingenTab === "achtergrond") inhoudHtml = renderInstellingenAchtergrond();
-  else if(state.instellingenTab === "plattegrond") inhoudHtml = renderPlattegrond();
-
-  return `
-    <h2 class="view-titel">Instellingen ⚙️</h2>
-    <div class="subtabs">${subnavHtml}</div>
-    ${inhoudHtml}`;
-}
-
-// Toont alle systeemupdates (nieuw én al eerder gelezen) in Instellingen > Algemeen — deze lijst
-// blijft compleet zichtbaar totdat sitebeheer een update zelf verwijdert (zie siteUpdateVerwijderen).
-function renderInstellingenUpdates(){
-  const updatesArr = Object.entries(state.siteUpdates || {}).sort((a,b) => (b[1].tijdstip||0)-(a[1].tijdstip||0));
-  const updatesHtml = updatesArr.length ? `
-    <ul class="update-lijst">
-      ${updatesArr.map(([,u]) => {
-        const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
-        return `
-        <li>
-          <div>
-            <span class="update-lijst__datum">${datum}</span>
-            ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
-            <span>${u.tekst}</span>
-          </div>
-        </li>`;
-      }).join("")}
-    </ul>` : `<div class="leeg">Nog geen updates geplaatst.</div>`;
-
-  return `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">📰 Updates van ${MERKNAAM}</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Alle updates blijven hier staan totdat sitebeheer ze verwijdert.</p>
-      ${updatesHtml}
-    </div>`;
-}
-
-function renderInstellingenAlgemeen(){
-  const eigenLid = state.leden[state.ledId];
-  const isEigenaar = !!(eigenLid && eigenLid.eigenaar);
-  const ledenArr = Object.entries(state.leden || {}).sort((a,b) => (a[1].aangemaakt||0)-(b[1].aangemaakt||0));
-
-  const teamHtml = `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Team &amp; rechten</div>
-      <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">${isEigenaar ? "Stel per teamlid een functie en rechten in — dat bepaalt welke tabbladen diegene te zien krijgt." : "Zo ziet het team er nu uit. Alleen een eigenaar kan dit hier aanpassen."}</p>
-      <div class="team-lijst">
-        ${ledenArr.map(([id, lid]) => {
-          const isZelf = id === state.ledId;
-          if(!isEigenaar){
-            // Alleen-lezen weergave: iedereen mag het team zien, maar niet aanpassen.
-            const rechtenTekst = lid.eigenaar
-              ? "Alle rechten"
-              : (RECHTEN_DEFINITIES.filter(r => lid.rechten && lid.rechten[r.key]).map(r => r.label).join(", ") || "Geen rechten");
-            return `
-              <div class="team-rij">
-                <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
-                ${lid.functie ? `<div style="color:var(--text-dim); font-size:.82rem;">${lid.functie}</div>` : ""}
-                <div style="color:var(--text-dim); font-size:.78rem;">${rechtenTekst}${lid.chatGeblokkeerd ? " · Chat geblokkeerd" : ""}</div>
-              </div>`;
-          }
-          // Eigenaar-weergave: bewerkbaar, ook voor rijen van (andere) eigenaren.
-          return `
-            <div class="team-rij">
-              <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
-              <input class="team-rij__functie" placeholder="Functie, bijv. Ober" value="${lid.functie||""}" data-action="functie-wijzigen" data-id="${id}">
-              ${lid.eigenaar ? `
-                <div style="color:var(--text-dim); font-size:.78rem;">Eigenaren hebben altijd alle rechten.</div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  ${isZelf ? `<button class="btn btn--ghost btn--sm" data-action="eigen-eigenaarschap-intrekken" title="Je eigen eigenaarschap intrekken">Eigenaarschap intrekken</button>` : ""}
-                </div>
-              ` : `
-                <div class="team-rij__rechten">
-                  ${RECHTEN_DEFINITIES.map(r => `
-                    <label class="team-recht">
-                      <input type="checkbox" data-action="recht-toggle" data-id="${id}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
-                      ${r.label}
-                    </label>`).join("")}
-                  <label class="team-recht" title="Standaard mag iedereen onbeperkt chatten — vink uit om alleen lezen toe te staan.">
-                    <input type="checkbox" data-action="chat-recht-toggle" data-id="${id}" ${lid.chatGeblokkeerd ? "" : "checked"}>
-                    💬 Mag chatten
-                  </label>
-                </div>
-                <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${id}" title="${lid.naam} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
-                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}" title="Eigenaarschap overzetten naar ${lid.naam} — jij wordt dan zelf teamlid">⇄ Overzetten</button>
-                </div>
-                <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
-              `}
-            </div>`;
-        }).join("")}
-      </div>
-    </div>`;
-
-  return `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Jouw naam</div>
-      <div class="naam-wijzig-form">
-        <input id="eigen-naam-invoer" maxlength="${MAX_LETTERS_SITE_NAAM}" value="${eigenLid ? eigenLid.naam : (state.gebruikersNaam || "")}">
-        <button class="btn btn--flame btn--sm" data-action="eigen-naam-opslaan">Opslaan</button>
-      </div>
-      <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Verandert je naam overal: bij al je restaurants op dit toestel én in de site-brede gebruikerslijst van sitebeheer.</p>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Restaurantnaam</div>
-      ${heeftRecht('instellingen') ? `
-        <div class="naam-wijzig-form">
-          <input id="restaurant-naam-invoer" maxlength="${effectieveNaamLimiet()}" value="${state.restaurantNaam}">
-          <button class="btn btn--flame btn--sm" data-action="naam-opslaan">Opslaan</button>
-        </div>
-        <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Een restaurantnaam mag maximaal ${effectieveNaamLimiet()} letters bevatten.</p>` : `<div>${state.restaurantNaam}</div>`}
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Restaurantcode</div>
-      <div class="code-tonen">
-        <div class="code-tonen__code">${state.restaurantCode}</div>
-        <button class="btn btn--ghost btn--sm" data-action="kopieer-code">Code kopiëren</button>
-      </div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin-top:12px;">Deel deze code met collega's zodat zij kunnen joinen op hun eigen apparaat.</p>
-    </div>
-
-    ${teamHtml}
-
-    ${renderInstellingenUpdates()}
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Zelfbestellen (QR-code)</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Gasten scannen deze code, kiezen hun eigen tafel en bestellen zelf — de bestelling komt gewoon bij Keuken binnen, precies zoals bij een bestelling die het team invoert.</p>
-      <div class="qr-vak"><img id="qr-img-algemeen" src="${zelfBestelQrAfbeeldingUrl(state.restaurantCode)}" width="220" height="220" alt="QR-code naar de zelfbestel-pagina"></div>
-      <div class="qr-link-tonen">
-        <input readonly value="${zelfBestelUrl(state.restaurantCode)}">
-        <button class="btn btn--ghost btn--sm" data-action="qr-link-kopieren">Link kopiëren</button>
-        <a class="btn btn--ghost btn--sm" href="${zelfBestelUrl(state.restaurantCode)}" target="_blank" rel="noopener">Link openen ↗</a>
-      </div>
-      <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Dit restaurant</div>
-      ${state.beheerBezoekModus ? `
-        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Je bekijkt dit restaurant als beheerder — dit apparaat is er geen lid van.</p>
-        <button class="btn btn--ghost" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>
-      ` : isEigenaar ? `
-        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen gaat terug naar het startscherm — dit restaurant blijft gewoon in je lijst staan. Verwijderen maakt het restaurant (menu, bestellingen en historie) meteen en definitief weg, voor iedereen.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel restaurant</button>
-          <button class="btn btn--ghost" style="border-color:var(--ember); color:var(--ember);" data-action="restaurant-verwijderen-eigenaar">🗑️ Restaurant verwijderen</button>
-        </div>
-      ` : `
-        <p style="color:var(--text-dim); font-size:.82rem; margin:0 0 12px;">Wisselen gaat terug naar het startscherm — dit restaurant blijft gewoon in je lijst staan. Verlaten haalt het wél uit je lijst en verwijdert ook je teamlid-account — je hebt daarna een nieuwe code van de eigenaar nodig om er weer bij te komen.</p>
-        <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn btn--ghost" data-action="terug-naar-start">🔀 Wissel restaurant</button>
-          <button class="btn btn--ghost" style="border-color:var(--ember); color:var(--ember);" data-action="restaurant-verlaten-lid">🚪 Restaurant verlaten</button>
-        </div>
-      `}
-    </div>
-
-    <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>`;
-}
-
-function renderInstellingenProducten(){
-  const menuArr = Object.entries(state.menu || {});
-  const categorieenArr = categorieenGesorteerd();
-  const categorieLijstHtml = categorieenArr.length ? categorieenArr.map(([id,c]) => `
-    <span class="categorie-chip">${c.naam}<button type="button" class="categorie-chip__x" data-action="categorie-verwijder" data-id="${id}" title="Categorie verwijderen">✕</button></span>
-  `).join("") : `<div class="leeg">Nog geen categorieën. Maak er hieronder een aan.</div>`;
-
-  const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
-    <li>
-      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.glasKeuze?' <span class="cat">🥂 glas</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
-      <span style="display:flex; align-items:center; gap:10px;">
-        <span>${euro(i.prijs)}</span>
-        <button class="verwijder-x" data-action="menu-bewerken" data-id="${id}" title="Bewerken">✎</button>
-        <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
-      </span>
-    </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
-
-  const bewerkItem = state.bewerkMenuId ? state.menu[state.bewerkMenuId] : null;
-
-  const emojiGrid = state.emojiPickerOpen ? `
-    <div class="emoji-grid">
-      ${Object.entries(EMOJI_CATEGORIEEN).map(([cat, lijst]) => `
-        <div class="emoji-grid__categorie">${cat}</div>
-        <div class="emoji-grid__rij">
-          ${lijst.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
-        </div>
-      `).join("")}
-    </div>` : "";
-
-  return `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">🏷️ Categorieën</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Maak hier eerst een categorie aan — die kies je daarna bij het toevoegen van een product. Bij Bestellen staan de producten van elke categorie in een rijtje onder de naam van die categorie.</p>
-      <div class="categorie-lijst">${categorieLijstHtml}</div>
-      <div class="categorie-form">
-        <input id="nieuwe-categorie" placeholder="Nieuwe categorie, bijv. Dranken">
-        <button class="btn btn--flame btn--sm" data-action="categorie-toevoegen">✨ Toevoegen</button>
-      </div>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">${bewerkItem ? "Product bewerken" : `Producten <span style="color:var(--text-dim); font-weight:400; font-size:.85rem;">(${menuArr.length})</span>`}</div>
-      <div class="menu-form">
-        <div class="emoji-kiezer">
-          <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
-          ${emojiGrid}
-        </div>
-        <input id="menu-naam" placeholder="Productnaam" maxlength="${MAX_LETTERS_PRODUCTNAAM}" value="${bewerkItem ? bewerkItem.naam : ""}">
-        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)" value="${bewerkItem ? bewerkItem.prijs : ""}">
-        <select id="menu-categorie" ${categorieenArr.length?"":"disabled"}>
-          ${categorieenArr.length ? categorieenArr.map(([,c]) => `<option value="${c.naam}" ${bewerkItem && bewerkItem.categorie===c.naam?"selected":""}>${c.naam}</option>`).join("") : `<option value="">Maak eerst een categorie</option>`}
-        </select>
-        <button class="btn btn--flame" data-action="${bewerkItem?'menu-opslaan':'menu-toevoegen'}" data-id="${state.bewerkMenuId||""}" ${categorieenArr.length?"":"disabled"}>${bewerkItem?"💾 Opslaan":"Toevoegen"}</button>
-        ${bewerkItem ? `<button class="btn btn--ghost" data-action="menu-bewerk-annuleren">Annuleren</button>` : ""}
-      </div>
-      <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.</p>
-      <div class="menu-form__opties">
-        <label class="menu-form__optie">
-          <input type="checkbox" id="menu-ijskeuze" ${bewerkItem && bewerkItem.ijsKeuze?"checked":""}>
-          🧊 IJskeuze aanbieden (ijsklontjes, ja/nee)
-        </label>
-        <label class="menu-form__optie">
-          <input type="checkbox" id="menu-slagroom" ${bewerkItem && bewerkItem.slagroomKeuze?"checked":""}>
-          🥛 Slagroomkeuze aanbieden
-        </label>
-        <label class="menu-form__optie">
-          <input type="checkbox" id="menu-glaskeuze" ${bewerkItem && bewerkItem.glasKeuze?"checked":""}>
-          🥂 Glaskeuze aanbieden (heeft de gast al een glas, ja/nee)
-        </label>
-      </div>
-      <ul class="menu-lijst">${menuHtml}</ul>
-    </div>`;
-}
-
-function renderVoorraad(){
-  const menuArr = Object.entries(state.menu || {});
-  const lijstHtml = menuArr.length ? menuArr.map(([id,i]) => `
-    <li class="voorraad-rij ${i.uitverkocht?'voorraad-rij--uitverkocht':''}">
-      <span class="voorraad-rij__naam">${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
-      <label class="voorraad-toggle">
-        <input type="checkbox" data-action="voorraad-toggle" data-id="${id}" ${i.uitverkocht?"checked":""}>
-        <span>Uitverkocht</span>
-      </label>
-    </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
-
-  return `
-    <h2 class="view-titel">Voorraad 📦</h2>
-    <div class="instel-blok">
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Zet een product op uitverkocht om het tijdelijk te verbergen bij Bestellen, zonder het te verwijderen.</p>
-      <ul class="voorraad-lijst">${lijstHtml}</ul>
-    </div>`;
-}
-
-// Teamchat: zichtbaar voor élk teamlid van dit restaurant, ongeacht rechten. Iedereen mag
-// hier onbeperkt in schrijven totdat de eigenaar de chatfunctie voor dat teamlid uitzet
-// (Instellingen > Algemeen > Team & rechten) — lezen kan dan nog wel gewoon.
-function renderChat(){
-  const eigenLid = state.leden[state.ledId];
-  const magChatten = !(eigenLid && eigenLid.chatGeblokkeerd);
-  const berichtenArr = Object.entries(state.chat || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
-  const berichtenHtml = berichtenArr.length ? `
-    <div class="team-chat">
-      ${berichtenArr.map(([id,b]) => `
-        <div class="team-chat__bericht ${b.ledId===state.ledId ? 'team-chat__bericht--eigen' : ''}">
-          <div class="team-chat__afzender">${b.naam || "Onbekend"}</div>
-          <div class="team-chat__tekst">${b.tekst}</div>
-        </div>`).join("")}
-    </div>` : `<div class="leeg">Nog geen berichten — begin het gesprek met je team!</div>`;
-
-  return `
-    <h2 class="view-titel">Chat 💬</h2>
-    <div class="instel-blok">
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Chat live met iedereen in dit restaurant.${magChatten ? "" : " De eigenaar heeft de chatfunctie voor jou uitgezet — je kunt hier nog wel meelezen."}</p>
-      ${berichtenHtml}
-      <textarea id="chat-tekst" rows="2" placeholder="${magChatten ? "Typ een bericht…" : "Je kunt momenteel niet chatten"}" ${magChatten?"":"disabled"} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:14px;"></textarea>
-      <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="chat-versturen" ${magChatten?"":"disabled"}>Versturen</button>
-    </div>`;
-}
-
-const REGENBOOG_KLEUREN = [
-  "#e6194b","#f58231","#ffe119","#bfef45","#3cb44b","#42d4f4",
-  "#4363d8","#911eb4","#f032e6","#800000","#a9a9a9","#000000","#ffffff"
-];
-
-function renderInstellingenAchtergrond(){
-  const huidig = state.thema || {};
-  const huidigeAchtergrond = huidig.achtergrond || "#150f0b";
-  const huidigeTekst = huidig.tekst || "#f3ead9";
-  const huidigPatroon = huidig.patroon || "geen";
-  const huidigLettertype = huidig.lettertype || "standaard";
-
-  const presetsHtml = THEMA_PRESETS.map(p => `
-    <button type="button" class="thema-swatch ${huidigeAchtergrond.toLowerCase()===p.achtergrond.toLowerCase() && huidigeTekst.toLowerCase()===p.tekst.toLowerCase() ? 'actief':''}"
-      style="background:${p.achtergrond}; color:${p.tekst};"
-      data-action="thema-preset" data-bg="${p.achtergrond}" data-tekst="${p.tekst}">
-      Aa<br><span>${p.naam}</span>
-    </button>`).join("");
-
-  const regenboogHtml = REGENBOOG_KLEUREN.map(kleur => `
-    <button type="button" class="regenboog-swatch ${huidigeAchtergrond.toLowerCase()===kleur.toLowerCase()?'actief':''}"
-      style="background:${kleur};" data-action="thema-regenboog" data-kleur="${kleur}" title="${kleur}"></button>`).join("");
-
-  const patroonHtml = PATROON_OPTIES.map(p => `
-    <button type="button" class="patroon-swatch ${huidigPatroon===p.key?'actief':''}" data-action="thema-patroon" data-patroon="${p.key}">
-      <span class="patroon-swatch__emoji">${p.emoji || "🚫"}</span>
-      <span>${p.naam}</span>
-    </button>`).join("");
-
-  const lettertypeHtml = LETTERTYPE_OPTIES.map(f => `
-    <button type="button" class="lettertype-swatch ${huidigLettertype===f.key?'actief':''}" style="font-family:${f.ui};" data-action="thema-lettertype" data-lettertype="${f.key}">${f.naam}</button>`).join("");
-
-  const huidigVorm = huidig.vorm || "standaard";
-  const vormHtml = VORM_OPTIES.map(v => `
-    <button type="button" class="vorm-swatch ${huidigVorm===v.key?'actief':''}" data-action="thema-vorm" data-vorm="${v.key}">
-      <span class="vorm-swatch__voorbeeld" style="border-radius:${v.radius};"></span>
-      <span>${v.naam}</span>
-    </button>`).join("");
-
-  const huidigGeluid = huidig.geluid || "geen";
-  const geluidGeenHtml = `
-    <div class="geluid-optie ${huidigGeluid==='geen' || huidigGeluid==='klassiek' ? 'actief':''}">
-      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="geen">🔇 Geen geluid</button>
-    </div>`;
-  const eigenGeluidActief = huidigGeluid === "eigen";
-  const eigenGeluidHtml = huidig.geluidEigenData ? `
-    <div class="geluid-optie ${eigenGeluidActief?'actief':''}">
-      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="eigen">🎵 ${huidig.geluidEigenNaam || "Eigen geluid"}</button>
-      <button type="button" class="geluid-optie__preview" data-action="geluid-eigen-preview" title="Beluister">▶</button>
-      <button type="button" class="geluid-optie__verwijder" data-action="geluid-eigen-verwijderen" title="Verwijderen">🗑️</button>
-    </div>` : "";
-  const geluidViewsHuidig = geluidViewsMetDefaults(huidig.geluidViews);
-  const geluidViewsHtml = MELDING_VIEWS_DEFINITIES.map(v => `
-    <label class="menu-form__optie">
-      <input type="checkbox" data-action="thema-geluid-view" data-view="${v.key}" ${geluidViewsHuidig[v.key] ? "checked" : ""}>
-      ${v.label}
-    </label>`).join("");
-
-  return `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Achtergrond</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Kies een kant-en-klare combinatie, of stel hieronder je eigen kleuren, patroon en lettertype in. Dit geldt voor alle apparaten van dit restaurant.</p>
-      <div class="thema-swatches">${presetsHtml}</div>
-
-      <div class="thema-eigen">
-        <div class="thema-eigen__rij">
-          <label>Achtergrondkleur</label>
-          <input type="color" value="${huidigeAchtergrond}" data-action="thema-achtergrond">
-        </div>
-        <div class="thema-eigen__rij">
-          <label>Tekstkleur</label>
-          <input type="color" value="${huidigeTekst}" data-action="thema-tekst">
-        </div>
-      </div>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Alle kleuren van de regenboog</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Klik zo op een kleur voor de achtergrond — de tekstkleur past zich automatisch aan zodat alles leesbaar blijft.</p>
-      <div class="regenboog-rij">${regenboogHtml}</div>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Achtergrondpatroon</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Een subtiel, herhalend patroon over de achtergrond.</p>
-      <div class="patroon-rij">${patroonHtml}</div>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Lettertype</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Verander het lettertype van de hele app. Elke naam staat in zijn eigen lettertype, zodat je meteen ziet hoe het eruitziet.</p>
-      <div class="lettertype-rij">${lettertypeHtml}</div>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Vorm van vakken</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Bepaalt hoe scherp of rond de hoeken van tekstvakken, knoppen en kaarten door de hele app zijn.</p>
-      <div class="vorm-rij">${vormHtml}</div>
-    </div>
-
-    <div class="instel-blok">
-      <div class="instel-blok__titel">🔊 Meldinggeluid</div>
-      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Speelt af zodra er een nieuwe bestelling binnenkomt, én zodra een bestelling klaar is om te bezorgen. Upload hieronder je eigen geluidsbestand, of zet het uit.</p>
-      <div class="geluid-rij">
-        ${geluidGeenHtml}
-        ${eigenGeluidHtml}
-      </div>
-      <div class="geluid-upload">
-        <label for="geluid-upload-invoer" class="btn btn--ghost btn--sm">⬆️ Eigen geluid uploaden</label>
-        <input type="file" id="geluid-upload-invoer" accept="audio/*" data-action="geluid-upload" style="display:none;">
-        <span style="color:var(--text-dim); font-size:.72rem;">Max ${Math.round(GELUID_MAX_BYTES/1024)} KB, geldt voor alle apparaten van dit restaurant.</span>
-      </div>
-      ${huidig.geluidEigenData ? `
-        <div class="geluid-duur-rij">
-          <label for="geluid-duur-invoer">Geluid inkorten tot</label>
-          <input type="number" id="geluid-duur-invoer" min="${GELUID_MIN_DUUR}" step="1"
-            placeholder="heel geluid" value="${huidig.geluidDuur || ""}" data-action="geluid-duur">
-          <span>sec (minimaal ${GELUID_MIN_DUUR} sec)</span>
-        </div>` : ""}
-      <p style="color:var(--text-dim); font-size:.82rem; margin:16px 0 8px;">Op welke tabbladen moet het geluid afgaan? Zet er zoveel aan als je wilt — het gaat per apparaat alleen af als dát apparaat op dat moment ook echt op zo'n tabblad staat, nergens anders. Vink bijv. Keuken aan voor nieuwe bestellingen, en Bezorgen voor bestellingen die klaar zijn om te bezorgen.</p>
-      <div class="menu-form__opties">
-        ${geluidViewsHtml}
-      </div>
-    </div>`;
-}
-
-function renderPlattegrond(){
-  const magBewerken = heeftRecht('instellingen');
-  const RIJEN = 7, KOLOMMEN = 12;
-  let cellenHtml = "";
-  for(let r=0;r<RIJEN;r++){
-    for(let c=0;c<KOLOMMEN;c++){
-      const key = r + "-" + c;
-      const obj = (state.plattegrond || {})[key];
-      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : stoelIconHtml(obj.rotatie)) : "";
-      cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+obj.type):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
-    }
-  }
-
-  return `
-    <div class="instel-blok">
-      <div class="instel-blok__titel">Plattegrond</div>
-      ${magBewerken ? `
-        <div class="plattegrond-tools">
-          <button type="button" class="btn btn--sm ${state.plattegrondTool==='tafel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="tafel">🍽️ Tafel</button>
-          <button type="button" class="btn btn--sm ${state.plattegrondTool==='stoel'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="stoel">🪑 Stoel</button>
-          <button type="button" class="btn btn--sm ${state.plattegrondTool==='wissen'?'btn--flame':'btn--ghost'}" data-action="plattegrond-tool" data-tool="wissen">🧹 Wissen</button>
-        </div>
-        <p style="color:var(--text-dim); font-size:.8rem; margin:12px 0 16px;">Kies hierboven wat je wilt plaatsen en klik daarna op een vakje. Nogmaals klikken op een tafel haalt 'm weer weg. Nogmaals klikken op een stoel draait 'm een kwart slag — blijf klikken om 'm verder te draaien. Elke tafel krijgt automatisch een nummer, en verschijnt daarmee klikbaar bij Bestellen. Gebruik "Wissen" om een tafel of stoel echt te verwijderen.</p>
-      ` : ""}
-      <div class="plattegrond-wrap">
-        <div class="plattegrond-grid" style="grid-template-columns:repeat(${KOLOMMEN}, 1fr);">${cellenHtml}</div>
-      </div>
-    </div>`;
-}
-
-// ============================================================
-// EVENTS (delegatie op #app)
-// ============================================================
-root.addEventListener("click", e => {
-  const el = e.target.closest("[data-action]");
-  if(!el) return;
-  const action = el.dataset.action;
-  const id = el.dataset.id;
-
-  switch(action){
-    case "ga-maken": {
-      if(!state.account){
-        toonToast("Log in om een restaurant te maken.");
-        accountPaneelOpenen();
-        break;
-      }
-      const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
-      if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
-        toonToast(`Je hebt het maximum van ${MAX_RESTAURANTS_GEMAAKT} gemaakte restaurants al bereikt.`);
-        break;
-      }
-      state.landingScherm="maken"; state.foutmelding=""; render(); break;
-    }
-    case "ga-joinen": state.landingScherm="joinen"; state.foutmelding=""; render(); break;
-    case "ga-feedback": state.landingScherm="feedback"; state.foutmelding=""; render(); break;
-    case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
-    case "maak-restaurant":
-      restaurantMaken(
-        document.getElementById("input-naam").value,
-        state.siteGebruikersNaam
-      );
-      break;
-    case "join-restaurant":
-      restaurantJoinen(
-        document.getElementById("input-code").value,
-        state.siteGebruikersNaam
-      );
-      break;
-    case "doorgaan-restaurant": {
-      const gekozen = state.mijnRestaurants.find(r => r.code === el.dataset.code);
-      if(gekozen){
-        state.restaurantCode = gekozen.code;
-        state.restaurantNaam = gekozen.naam;
-        state.ledId = gekozen.ledId;
-        state.gebruikersNaam = gekozen.gebruikersNaam;
-        startRestaurant();
-      }
-      break;
-    }
-
-    case "wissel-view": state.huidigeView = el.dataset.view; render(); break;
-    case "kopieer-code":
-      navigator.clipboard?.writeText(state.restaurantCode);
-      toonToast("Code gekopieerd: " + state.restaurantCode);
-      break;
-    case "terug-naar-start":
-      verlaatHuidigRestaurant();
-      break;
-    case "restaurant-verwijderen-eigenaar": restaurantVerwijderenDoorEigenaar(); break;
-    case "restaurant-verlaten-lid": restaurantVerlatenAlsLid(); break;
-
-    case "toevoegen-wagen": toevoegenAanWagen(id, state.menu[id]); break;
-    case "wagen-plus": wagenAantalWijzigen(id, 1); break;
-    case "wagen-min": wagenAantalWijzigen(id, -1); break;
-    case "wagen-verwijder": wagenVerwijderen(id); break;
-    case "verzend-bestelling": bestellingVerzenden(); break;
-
-    case "start-bereiden": statusBijwerken(id, "bereiden"); break;
-    case "bereiden-klaar": statusBijwerken(id, "klaar"); break;
-    case "markeer-bezorgd": bestellingBezorgd(id); break;
-
-    case "historie-verwijder": historieVerwijderen(id); break;
-    case "historie-wissen": historieWissen(); break;
-
-    case "chat-versturen": chatBerichtVersturen(document.getElementById("chat-tekst").value); break;
-
-    case "account-paneel-openen": accountPaneelOpenen(); break;
-    case "account-paneel-sluiten": accountPaneelSluiten(); break;
-    case "account-modus-inloggen": accountModusWisselen("inloggen"); break;
-    case "account-modus-registreren": accountModusWisselen("registreren"); break;
-    case "account-registreren":
-      accountRegistreren(
-        document.getElementById("account-username").value,
-        document.getElementById("account-email").value,
-        document.getElementById("account-wachtwoord").value
-      );
-      break;
-    case "account-inloggen":
-      accountInloggen(
-        document.getElementById("account-email").value,
-        document.getElementById("account-wachtwoord").value
-      );
-      break;
-    case "account-uitloggen": accountUitloggen(); break;
-    case "account-naam-menu-togglen": accountNaamMenuTogglen(); break;
-    case "account-naam-bewerken": accountNaamBewerkenTogglen(); break;
-    case "account-naam-annuleren": accountNaamBewerkenTogglen(); break;
-    case "account-naam-opslaan":
-      accountNaamOpslaan(document.getElementById("topbar-naam-input").value);
-      break;
-
-    case "beheer-open": beheerPaneelOpenen(); break;
-    case "qr-printen": qrPrinten(); break;
-    case "qr-link-kopieren": qrLinkKopieren(); break;
-    case "beheer-sluiten": beheerPaneelSluiten(); break;
-    case "beheer-inloggen":
-      beheerInloggen(
-        state.siteGebruikersNaam,
-        document.getElementById("beheer-email").value,
-        document.getElementById("beheer-wachtwoord").value
-      );
-      break;
-    case "beheer-uitloggen": beheerderUitloggen(); break;
-    case "beheer-bezoeken": beheerRestaurantBezoeken(id); break;
-    case "beheer-verwijderen": beheerRestaurantVerwijderen(id); break;
-    case "beheer-waarschuwen": beheerRestaurantWaarschuwen(id); break;
-    case "beheer-naamlimiet": beheerRestaurantNaamLimiet(id); break;
-    case "beheer-waarschuwing-intrekken": beheerRestaurantWaarschuwingIntrekken(id); break;
-    case "waarschuwing-sluiten": waarschuwingSluiten(); break;
-    case "beheer-terug-paneel": beheerRestaurantVerlaten(); break;
-    case "site-update-toevoegen":
-      siteUpdateToevoegen(
-        document.getElementById("site-update-titel").value,
-        document.getElementById("site-update-tekst").value
-      );
-      break;
-    case "site-update-verwijder": siteUpdateVerwijderen(id); break;
-    case "poging-verwijder": sitebeheerPogingVerwijderen(id); break;
-    case "feedback-versturen": feedbackVersturen(document.getElementById("feedback-tekst").value); break;
-    case "feedback-verwijderen": feedbackVerwijderen(id); break;
-    case "ban-bericht-versturen": banBerichtVersturenGebruiker(document.getElementById("ban-bericht-tekst").value); break;
-    case "beheer-ban-chat-togglen": beheerBanChatTogglen(id); break;
-    case "beheer-ban-bericht-versturen": banBerichtVersturenBeheer(id, document.getElementById("beheer-ban-bericht-tekst-" + id).value); break;
-    case "beheer-ban-berichten-blokkeren": beheerBanBerichtenBlokkeren(id); break;
-    case "beheer-ban-berichten-deblokkeren": beheerBanBerichtenDeblokkeren(id); break;
-    case "beheer-ban-chat-verwijderen": beheerBanChatVerwijderen(id); break;
-    case "site-update-bewerken": siteUpdateBewerkStarten(id); break;
-    case "site-update-bewerk-annuleren": siteUpdateBewerkAnnuleren(); break;
-    case "site-update-opslaan":
-      siteUpdateBewerkOpslaan(
-        id,
-        document.getElementById("site-update-bewerk-titel-" + id).value,
-        document.getElementById("site-update-bewerk-tekst-" + id).value
-      );
-      break;
-
-    case "lid-verwijderen": ledVerwijderen(id); break;
-    case "lid-eigenaar-maken": ledEigenaarschapOverzetten(id); break;
-    case "lid-eigenaar-toevoegen": ledEigenaarToevoegen(id); break;
-    case "eigen-eigenaarschap-intrekken": eigenEigenaarschapIntrekken(); break;
-
-    case "instellingen-subtab": state.instellingenTab = el.dataset.tab; render(); break;
-    case "eigen-naam-opslaan":
-      eigenNaamWijzigen(document.getElementById("eigen-naam-invoer").value);
-      break;
-    case "naam-opslaan":
-      restaurantNaamWijzigen(document.getElementById("restaurant-naam-invoer").value);
-      break;
-    case "thema-preset": themaPresetKiezen(el.dataset.bg, el.dataset.tekst); break;
-    case "thema-regenboog":
-      db.ref("restaurants/" + state.restaurantCode + "/thema").update({
-        achtergrond: el.dataset.kleur,
-        tekst: contrastKleur(el.dataset.kleur),
-      });
-      break;
-    case "thema-patroon": themaWijzigen("patroon", el.dataset.patroon); break;
-    case "thema-lettertype": themaWijzigen("lettertype", el.dataset.lettertype); break;
-    case "thema-vorm": themaWijzigen("vorm", el.dataset.vorm); break;
-    case "thema-geluid": themaGeluidKiezen(el.dataset.geluid); break;
-    case "geluid-eigen-preview": geluidAfspelen((state.thema||{}).geluidEigenData, (state.thema||{}).geluidDuur); break;
-    case "geluid-eigen-verwijderen": themaEigenGeluidVerwijderen(); break;
-    case "plattegrond-tool": state.plattegrondTool = el.dataset.tool; render(); break;
-    case "plattegrond-cel": plattegrondCelKlikken(el.dataset.cel); break;
-
-    case "bestel-tafel-kiezen": {
-      const cel = el.dataset.cel;
-      const celData = state.plattegrond[cel];
-      state.actieveTafelCel = cel;
-      state.tafel = "Tafel " + (celData && celData.nummer ? celData.nummer : "");
-      state.bestelModus = "producten";
-      render();
-      break;
-    }
-    case "bestel-zonder-tafel":
-      state.actieveTafelCel = null;
-      state.tafel = "";
-      state.bestelModus = "producten";
-      render();
-      break;
-    case "bestel-terug-plattegrond": state.bestelModus = "plattegrond"; render(); break;
-    case "tafel-betaald": tafelBetaald(state.actieveTafelCel); break;
-
-    case "emoji-toggle": state.emojiPickerOpen = !state.emojiPickerOpen; render(); break;
-    case "emoji-kies": state.nieuwProductEmoji = el.dataset.emoji; state.emojiPickerOpen = false; render(); break;
-
-    case "menu-toevoegen":
-      menuItemToevoegen(
-        document.getElementById("menu-naam").value,
-        document.getElementById("menu-prijs").value,
-        document.getElementById("menu-categorie").value,
-        state.nieuwProductEmoji,
-        document.getElementById("menu-ijskeuze").checked,
-        document.getElementById("menu-slagroom").checked,
-        document.getElementById("menu-glaskeuze").checked
-      );
-      state.nieuwProductEmoji = "🍽️";
-      render();
-      break;
-    case "menu-verwijder": menuItemVerwijderen(id); break;
-    case "menu-bewerken": menuItemBewerkStarten(id); break;
-    case "menu-bewerk-annuleren": menuItemBewerkAnnuleren(); break;
-    case "menu-opslaan":
-      menuItemBewerkOpslaan(
-        id,
-        document.getElementById("menu-naam").value,
-        document.getElementById("menu-prijs").value,
-        document.getElementById("menu-categorie").value,
-        state.nieuwProductEmoji,
-        document.getElementById("menu-ijskeuze").checked,
-        document.getElementById("menu-slagroom").checked,
-        document.getElementById("menu-glaskeuze").checked
-      );
-      break;
-
-    case "categorie-toevoegen":
-      categorieToevoegen(document.getElementById("nieuwe-categorie").value);
-      break;
-    case "categorie-verwijder": categorieVerwijderen(id); break;
-
-    case "update-gelezen": updateGelezenMarkeren(id); break;
-
-    case "site-naam-opslaan":
-      siteNaamOpslaan(document.getElementById("input-site-naam").value);
-      break;
-    case "beheer-lid-eigenaar-toevoegen": beheerLidEigenaarToevoegen(el.dataset.restaurant, id); break;
-    case "beheer-lid-eigenaar-overzetten": beheerLidEigenaarschapOverzetten(el.dataset.restaurant, id); break;
-    case "gebruiker-blokkeren-timeout": beheerGebruikerBlokkerenTimeout(id); break;
-    case "gebruiker-blokkeren-dagen": beheerGebruikerBlokkerenDagen(id); break;
-    case "gebruiker-blokkeren-oneindig": beheerGebruikerBlokkerenOneindig(id); break;
-    case "gebruiker-deblokkeren": beheerGebruikerDeblokkeren(id); break;
-  }
-});
-
-root.addEventListener("input", e => {
-  const el = e.target.closest("[data-action]");
-  if(!el) return;
-  const action = el.dataset.action;
-  const id = el.dataset.id;
-  if(action === "wagen-notitie") wagenNotitieWijzigen(id, el.value);
-  if(action === "tafel-invoer") state.tafel = el.value;
-});
-
-root.addEventListener("change", e => {
-  const el = e.target.closest("[data-action]");
-  if(!el) return;
-  const action = el.dataset.action;
-  const id = el.dataset.id;
-  if(action === "recht-toggle") ledRechtToggle(id, el.dataset.recht, el.checked);
-  if(action === "chat-recht-toggle") ledChatToggle(id, el.checked);
-  if(action === "functie-wijzigen") ledFunctieWijzigen(id, el.value);
-  if(action === "thema-achtergrond") themaWijzigen("achtergrond", el.value);
-  if(action === "thema-tekst") themaWijzigen("tekst", el.value);
-  if(action === "voorraad-toggle") menuItemUitverkochtWijzigen(id, el.checked);
-  if(action === "wagen-ijs") wagenIjsWijzigen(id, el.checked);
-  if(action === "wagen-slagroom") wagenSlagroomWijzigen(id, el.checked);
-  if(action === "wagen-glas") wagenGlasWijzigen(id, el.checked);
-  if(action === "geluid-upload"){ themaEigenGeluidUploaden(el.files[0]); el.value = ""; }
-  if(action === "geluid-duur") themaGeluidDuurWijzigen(el.value);
-  if(action === "thema-geluid-view") themaGeluidViewToggle(el.dataset.view);
-});
-
-// ============================================================
-// START
-// ============================================================
-// Systeemupdates zijn site-breed en dus altijd actief, ook als er nog geen restaurant gekozen is.
-db.ref("site_updates").on("value", snap => {
-  state.siteUpdates = snap.val() || {};
-  render();
-});
-// Blokkade-check voor dit apparaat: altijd actief (los van welk scherm actief is), zodat
-// sitebeheer iemand ook tíjdens een sessie meteen kan blokkeren of weer vrijgeven.
-db.ref("bans/" + state.apparaatId).on("value", snap => {
-  const data = snap.val();
-  state.geblokkeerdGecontroleerd = true;
-  state.geblokkeerd = (data && (typeof data.totEnMet !== "number" || data.totEnMet > Date.now())) ? data : null;
-  render();
-});
-// Als dit apparaat al eerder een naam heeft ingevuld, meteen de gebruikerslijst bijwerken
-// (laatste bezoek) — zo blijft Sitebeheer > Gebruikers actueel.
-if(state.siteGebruikersNaam) gebruikerRegistreren();
-// Eén Firebase-sessie kan óf een gewoon account zijn (eigen restaurants maken), óf een
-// sitebeheer-account — dat wordt hier voor elke sessie apart uitgezocht: sitebeheer-status via
-// de "beheerders/<uid>"-lijst (zie readme.md voor hoe je jezelf daaraan toevoegt), een gewoon
-// account via "accounts/<uid>". Zonder deze scheiding zou elk zelfgeregistreerd account (via
-// het inlogvak bovenin) automatisch volledige sitebeheer-rechten krijgen — dat mag niet.
-auth.onAuthStateChanged(gebruiker => {
-  state.beheerFoutmelding = "";
-  if(!gebruiker){
-    state.beheerderActief = false;
-    state.account = null;
-    state.accountNaamMenuOpen = false;
-    state.accountNaamBewerken = false;
-    accountRestaurantenListenerStoppen();
-    render();
-    return;
-  }
-  db.ref("beheerders/" + gebruiker.uid).once("value").then(snap => {
-    state.beheerderActief = snap.val() === true;
-    if(state.beheerderActief && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
-    render();
-  });
-  db.ref("accounts/" + gebruiker.uid).once("value").then(snap => {
-    const data = snap.val();
-    state.account = { uid: gebruiker.uid, email: gebruiker.email, username: (data && data.username) || gebruiker.email };
-    accountRestaurantenLuisteren(gebruiker.uid);
-    render();
-  });
-});
-// Koppelt bij het opstarten meteen live listeners op de eigenaar-status van elk restaurant in
-// je lijst, zodat "Gemaakte"/"Gejoinde restaurants" op het startscherm altijd blijft kloppen —
-// ook als de eigenaar-wissel gebeurt terwijl jij al op dit scherm zit (zie
-// mijnRestaurantsEigenaarSyncStarten hierboven voor de volledige uitleg).
-mijnRestaurantsEigenaarSyncStarten();
-render();
