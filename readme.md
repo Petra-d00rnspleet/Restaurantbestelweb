@@ -153,93 +153,48 @@ const firebaseConfig = {
 };
 ```
 
-### Databaseregels (testmodus verloopt na 30 dagen)
+### Databaseregels (beveiliging)
 
-Ga naar **Realtime Database → Regels** en zet:
+De regels staan in **`database.rules.json`** (in deze map). Zet de inhoud in **Realtime Database → Regels** en klik **Publiceren**.
 
-```json
-{
-  "rules": {
-    "restaurants": {
-      ".read": "auth != null",
-      ".write": "auth != null",
-      "$code": {
-        ".read": true,
-        ".write": true,
-        "bestellingen": {
-          ".indexOn": ["gastId"]
-        }
-      }
-    },
-    "site_updates": {
-      ".read": true,
-      ".write": "auth != null"
-    },
-    "sitebeheer_pogingen": {
-      ".read": "auth != null",
-      ".write": true
-    },
-    "feedback": {
-      ".read": "auth != null",
-      ".write": true
-    },
-    "gebruikers": {
-      ".read": "auth != null",
-      ".write": true
-    },
-    "bans": {
-      ".read": true,
-      ".write": "auth != null",
-      "$apparaatId": {
-        "berichten": {
-          ".write": true
-        }
-      }
-    },
-    "verwijderd": {
-      ".read": "auth != null",
-      "$apparaatId": {
-        ".read": true,
-        ".write": "auth != null"
-      }
-    },
-    "uitnodigingen": {
-      "$token": {
-        ".read": true,
-        ".write": "auth != null || !newData.exists()"
-      }
-    },
-    "beheerders": {
-      "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": false
-      }
-    },
-    "accounts": {
-      "$uid": {
-        ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid"
-      }
-    }
-  }
-}
-```
+**Volgorde bij het uitrollen (belangrijk):**
+1. Zet eerst alle bestanden (`app.js`, `bestellen.js`, `index.html`, `bestellen.html`, `style.css`) op GitHub en wacht tot GitHub Pages ze heeft bijgewerkt. Open de site daarna één keer met een harde refresh (Ctrl/Cmd + Shift + R).
+2. Controleer dat jouw beheerder-account bestaat: Firebase-console → **Authentication → Users**, en in **Realtime Database → Gegevens** een regel `beheerders/<UID> = true` (zie "Sitebeheer" hierboven). **Zonder die regel sluit je jezelf buiten Sitebeheer.**
+3. Plak dan pas de nieuwe regels en publiceer. Test in het tabblad **Regels → Regelsimulator** of probeer de site: een restaurant maken, een bestelling plaatsen via `bestellen.html`, status wijzigen in Keuken, Sitebeheer openen.
 
-Wat dit doet:
-- Gewone gasten/teamleden kunnen, zoals voorheen, gewoon bij één specifiek restaurant via de code (`restaurants/K3F7Q/...`) — dat blijft zonder inloggen werken, precies zoals de app dat gebruikt.
-- **Alle** restaurants tegelijk opvragen (`restaurants` zonder code — dat is wat het sitebeheer-paneel doet om de lijst te tonen) kan alleen nog met een geldige Firebase-inlogsessie (`auth != null`). Zonder in te loggen krijg je die lijst dus nergens meer te zien, ook niet door rechtstreeks met de database te praten.
-- Systeemupdates blijven voor iedereen leesbaar, maar alleen ingelogde beheerders kunnen ze plaatsen/verwijderen.
-- Elke inlogpoging bij Sitebeheer (gelukt én mislukt) wordt weggeschreven naar `sitebeheer_pogingen` — dat moet zonder inloggen kunnen schrijven (iemand die nog niet is ingelogd, is per definitie degene die een poging doet), maar **lezen** van die lijst kan alleen met een geldige inlogsessie. Zo kun jij als eigenaar zien of iemand geprobeerd heeft binnen te komen, zonder dat een buitenstaander die lijst ook kan inzien.
-- Feedback-berichten van restaurant-eigenaren (`feedback`) werken op dezelfde manier: schrijven kan zonder inloggen (want teamleden loggen nergens mee in), lezen kan alleen met een geldige inlogsessie.
-- `gebruikers` (de site-brede naamlijst) werkt ook zo: elk apparaat mag zijn eigen ingevulde naam wegschrijven zonder in te loggen, maar de hele lijst tegelijk opvragen (wat het Sitebeheer-paneel doet) kan alleen met een geldige inlogsessie.
-- `bans` is net andersom: **schrijven** (iemand blokkeren/deblokkeren) kan alleen met een geldige inlogsessie, maar **lezen** staat open — dat is nodig omdat elk apparaat zonder in te loggen moet kunnen checken of het zelf geblokkeerd is. Dit betekent dat de banlijst (namen + apparaat-id's) in theorie door iedereen is op te vragen die rechtstreeks met de database praat; net als bij de restaurantcode is dit een bewuste, lichte keuze, geen lek van gevoeligere gegevens dan een naam.
-- Onder elke blokkade mag het bijbehorende apparaat wél zonder inloggen schrijven naar `bans/$apparaatId/berichten` — dat is het bezwaar-gesprek met sitebeheer (zie hieronder). Dit overschrijft alleen dat ene subpad; de blokkade zelf (`bans/$apparaatId`) blijft verder gewoon alleen met een geldige inlogsessie te zetten of te verwijderen.
-- `verwijderd/<apparaatId>` markeert een door sitebeheer verwijderde gebruiker. Alleen een ingelogde beheerder kan dit zetten; elk apparaat mag alleen zijn eígen regel lezen (om te zien dat het verwijderd is).
-- `uitnodigingen/<token>` zijn de eenmalige "nieuwe links". Alleen een ingelogde beheerder kan er een maken; iedereen met de link kan 'm lezen en weggooien (dat gebeurt automatisch bij gebruik, zodat de link maar één keer werkt).
-- `beheerders/<uid>` bepaalt wie écht sitebeheerder is: alleen dat ene account mag zijn eigen regel lezen (om te checken of het 'm zelf is), en **niemand** kan er via de site bij schrijven (`.write: false`) — die regel zet jij zelf handmatig in de Firebase-console (zie hierboven), nooit via de app.
-- `accounts/<uid>` is het gewone account van een bezoeker (gebruikersnaam + de restaurants die diegene gemaakt heeft): alleen dat account zelf mag zijn eigen gegevens lezen én schrijven.
+**Wat de regels doen**
+- **Sitebeheer is nu echt afgeschermd.** Eerder stond overal `auth != null` ("elk ingelogd account"). Maar iedereen kan zelf een account aanmaken (ook rechtstreeks via de Firebase-API, buiten de site om) en was daarmee beheerder. Nu geldt alleen: `beheerders/<uid> = true`, en dat veld kan niemand via de site zetten.
+- `restaurants` (alle restaurants tegelijk), feedback, inlogpogingen, gebruikerslijst en de banlijst zijn alleen leesbaar voor beheerders. Een apparaat kan alleen zijn **eigen** blokkade/verwijderd-status lezen.
+- `site_updates` en `uitnodigingen` maken kunnen alleen beheerders.
+- Een geblokkeerd apparaat mag alleen berichten sturen als er echt een blokkade bestaat (voorkomt dat iemand een ander apparaat per ongeluk "blokkeert" door een bericht te schrijven).
+- **Datavalidatie overal**: lengtes, types, toegestane velden, kleuren (`#rrggbb`), geluid moet een `data:audio/`-bestand zijn, plattegrondcellen binnen het raster, enz. Zo kan niemand miljoenen tekens of vreemde velden in je database zetten.
+- **Prijzen worden gecontroleerd.** Elke bestelregel bevat het `menuId` van het product; de database weigert een nieuwe bestelling als de prijs niet gelijk is aan de menuprijs, of als het product uitverkocht is. Een gast kan dus niet meer met de browserconsole alles voor €0,00 bestellen.
+- Restaurantcodes moeten 4–10 hoofdletters/cijfers zijn. Nieuwe restaurants krijgen een code van **8 tekens** (was 5), oude codes blijven werken.
+- De regel voor `accounts/<uid>` is weggelaten: de huidige app gebruikt die niet meer.
 
-⚠️ Let op: de restaurantcode (`$code`) zelf werkt nog steeds als een soort "wachtwoord" voor dat ene restaurant — wie de code weet of raadt, kan dat restaurant lezen/wijzigen. Dat is een bewuste, lichte keuze van dit project (net als bij een tafelbon-code) en geen verkeerde configuratie; alleen het **sitebeheer-gedeelte** (alle restaurants + systeemupdates) is nu met een echt account afgeschermd.
+**Wat de regels (nog) niet kunnen**
+De restaurantcode blijft het "wachtwoord" van een restaurant: wie de code weet, kan dat restaurant lezen en wijzigen (ook de bestellingen van andere gasten). Dat komt doordat teamleden en gasten niet inloggen. Echt dichtzetten kan alleen met inloggen per teamlid (bijv. anonieme Firebase-login + een ledenlijst op uid). De code is nu wel niet meer te raden, en de gevoeligste delen zijn beschermd, maar bewaar de code en QR-link dus alleen bij mensen die erbij mogen.
+
+**Nog te doen in de Google-/Firebase-console (kost 5 minuten)**
+1. **API-sleutel beperken:** Google Cloud Console → *APIs & Services → Credentials* → de "Browser key" → *Application restrictions: Websites* → voeg alleen jouw GitHub Pages-adres toe (`https://JOUW-NAAM.github.io/*`) en `localhost` om te testen. (De sleutel in `firebase-config.js` is geen geheim, maar zo werkt hij niet meer vanaf andermans site.)
+2. **App Check** (optioneel, gratis): Firebase-console → *App Check* → registreer je web-app met reCAPTCHA v3 en zet handhaving aan voor Realtime Database en Authentication.
+3. **Authentication → Instellingen:** zet *E-mailopsomming beveiliging* (email enumeration protection) aan.
+4. Oude restaurants hebben mogelijk nog een veld `eigenaarEmail` bij de eigenaar onder `leden/`. Nieuwe restaurants slaan dat niet meer op. Verwijder het gerust handmatig bij oude restaurants (het is leesbaar voor iedereen die de code heeft).
+
+### Wat is er nieuw (beveiliging & verbeteringen)
+
+| Onderdeel | Wat |
+|---|---|
+| XSS-bescherming | Alle tekst uit de database (namen, notities, chat, updates, ...) wordt ge-escaped voordat 'ie in de pagina komt. Voorheen kon iemand via bijv. een productnaam of chatbericht code in de pagina van het hele team zetten. |
+| Sitebeheer-check | De app controleert nu zelf ook `beheerders/<uid>`; een gewoon account dat inlogt bij Sitebeheer wordt meteen weer uitgelogd. |
+| Content-Security-Policy | `index.html` en `bestellen.html` laden alleen scripts van de site zelf, Firebase en Google. Mocht er onverhoopt iets niet meer werken, dan kun je als eerste de `Content-Security-Policy`-regel in de `<head>` weghalen om te testen. |
+| Sterkere codes | Restaurantcode 8 tekens, apparaat-id's, gast-id's en uitnodigingslinks via `crypto` i.p.v. `Math.random`. |
+| Wachtwoorden | Minimaal 8 tekens, plus "Wachtwoord vergeten?" voor restaurant-eigenaren. |
+| Invoergrenzen | Max. lengtes voor chat, notities, namen, feedback en prijs (0–9999), ook in de regels. |
+| Verbindingsmelding | Rode balk als de verbinding wegvalt; gasten kunnen dan niet "verzenden" (voorheen stond de bestelling stil in de browserwachtrij terwijl de gast "verzonden" zag). |
+| Foutmeldingen | Geweigerde opslagacties geven nu een melding in plaats van stil te falen. |
+| Talen (gastpagina) | `bestellen.html` heeft een taalkiezer: Nederlands, English, Deutsch, Français, Español. De taal wordt onthouden en de keuken ziet bestellingen altijd in het Nederlands. De afgesproken statuslabels (Afgeleverd / In bereiding / Onderweg) zijn in elke taal hetzelfde gebleven. |
+| Anti-spam gasten | 8 seconden tussen twee bestellingen van hetzelfde apparaat. |
 
 ## 2. Lokaal uitproberen
 
@@ -269,6 +224,7 @@ Daarna:
 | `style.css` | Het "keukenbon"-ontwerp: donker staal + vlam-oranje + bestelbonnetjes |
 | `app.js` | Alle logica: schermen, winkelwagen, Firebase-synchronisatie |
 | `firebase-config.js` | Hier vul je je eigen Firebase-gegevens in |
+| `database.rules.json` | De databaseregels (beveiliging) om in de Firebase-console te plakken |
 | `bestellen.html` / `bestellen.js` | De zelfbestel-pagina voor gasten (QR-code) |
 
 ## Hoe de data eruitziet in Firebase
