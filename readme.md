@@ -308,3 +308,10 @@ Zodra de status van een bestelling wijzigt (via de Keuken- of Bezorgen-pagina), 
 - Inloggen per medewerker (Firebase Authentication)
 - Geschiedenis van bezorgde bestellingen bewaren i.p.v. verwijderen
 - Prijzen per bestelling optellen tot een dagtotaal in Instellingen
+
+
+### Sitebrede accounts (bijgewerkt)
+
+Bovenaan de site staat nu **Inloggen / Account maken**. Accounts gebruiken Firebase Authentication; de gebruikersnaam wordt onder `accounts/<UID>/profiel` bewaard. Uitloggen beëindigt alleen de account-sessie. Account verwijderen verwijdert het Firebase-account en profiel, maar laat bestaande restaurants, bestellingen en de lokale restaurantlijst ongemoeid.
+
+**Sitebeheer blijft apart beveiligd.** Het vinkje bij accountregistratie verleent niet automatisch beheerrechten: Firebase moet `beheerders/<UID> = true` al bevestigen. Dit is bewust zo, omdat een wachtwoordcontrole die alleen in browsercode gebeurt geen veilige manier is om beheerrechten uit te delen. De site-eigenaar kent beheerrechten toe via de Firebase-console, zoals beschreven bij Sitebeheer. Voor het gebruik van accounts moeten de gepubliceerde Realtime Database-regels schrijven/lezen van `accounts/<eigen UID>/profiel` toestaan voor de ingelogde account-sessie.
