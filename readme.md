@@ -106,6 +106,9 @@ Onderaan het startscherm (en onderaan Instellingen, als je al in een restaurant 
 
   Vanaf die "Toegang geblokkeerd"-pagina kan de geblokkeerde persoon ook gewoon een bericht sturen (bijv. "dit is een vergissing") — geen wachttijd, net als een normaal gesprek. Bij "Gebruikers & blokkades" verschijnt dan een knop **"💬 Bericht"** naast die gebruiker, met het hele gesprek en een antwoordveld; je antwoord verschijnt meteen (live) op de blokkade-pagina van die persoon, zodat je heen en weer kunt overleggen zonder ergens anders te hoeven mailen.
 
+- **Gebruikers verwijderen**: naast blokkeren heeft elke gebruiker een knop **"🗑️ Verwijderen"**. De gebruiker verdwijnt dan uit de lijst (en een eventuele blokkade en bezwaar-gesprek worden ook gewist). Zodra die persoon de site opent (of al open had staan), ziet diegene alleen nog het scherm **"Je bent verwijderd"**, met de uitleg dat er een nieuwe link nodig is. Dat apparaat wordt ook opgeruimd: de teamlid-accounts van die persoon verdwijnen uit alle restaurants, en de lokale naam en restaurantlijst worden gewist. Restaurants die diegene zelf had gemaakt blijven bestaan (je kunt het eigenaarschap via Sitebeheer overzetten of het restaurant verwijderen). Het scherm bevat ook een vak om sitebeheer een bericht te sturen; dat komt binnen bij "Feedback" met "(verwijderd)" achter de naam.
+- **Nieuwe link maken**: onder "🔗 Nieuwe link voor verwijderde gebruikers" maak je met één klik een eenmalige link (`index.html?nieuw=<token>`), die ook meteen gekopieerd wordt. Opent iemand die link, dan krijgt dat apparaat een nieuw apparaat-id en begint de persoon helemaal opnieuw met het invullen van een naam (een nieuw account). De link werkt maar één keer; een tweede keer geeft "Link ongeldig".
+
 Dit werkt met een **echt account via Firebase Authentication** — er staat geen wachtwoord meer ergens in de broncode. Zo stel je dat in:
 
 1. Ga in de Firebase-console naar **Build → Authentication** → **Get started**.
@@ -192,6 +195,19 @@ Ga naar **Realtime Database → Regels** en zet:
         }
       }
     },
+    "verwijderd": {
+      ".read": "auth != null",
+      "$apparaatId": {
+        ".read": true,
+        ".write": "auth != null"
+      }
+    },
+    "uitnodigingen": {
+      "$token": {
+        ".read": true,
+        ".write": "auth != null || !newData.exists()"
+      }
+    },
     "beheerders": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
@@ -217,6 +233,8 @@ Wat dit doet:
 - `gebruikers` (de site-brede naamlijst) werkt ook zo: elk apparaat mag zijn eigen ingevulde naam wegschrijven zonder in te loggen, maar de hele lijst tegelijk opvragen (wat het Sitebeheer-paneel doet) kan alleen met een geldige inlogsessie.
 - `bans` is net andersom: **schrijven** (iemand blokkeren/deblokkeren) kan alleen met een geldige inlogsessie, maar **lezen** staat open — dat is nodig omdat elk apparaat zonder in te loggen moet kunnen checken of het zelf geblokkeerd is. Dit betekent dat de banlijst (namen + apparaat-id's) in theorie door iedereen is op te vragen die rechtstreeks met de database praat; net als bij de restaurantcode is dit een bewuste, lichte keuze, geen lek van gevoeligere gegevens dan een naam.
 - Onder elke blokkade mag het bijbehorende apparaat wél zonder inloggen schrijven naar `bans/$apparaatId/berichten` — dat is het bezwaar-gesprek met sitebeheer (zie hieronder). Dit overschrijft alleen dat ene subpad; de blokkade zelf (`bans/$apparaatId`) blijft verder gewoon alleen met een geldige inlogsessie te zetten of te verwijderen.
+- `verwijderd/<apparaatId>` markeert een door sitebeheer verwijderde gebruiker. Alleen een ingelogde beheerder kan dit zetten; elk apparaat mag alleen zijn eígen regel lezen (om te zien dat het verwijderd is).
+- `uitnodigingen/<token>` zijn de eenmalige "nieuwe links". Alleen een ingelogde beheerder kan er een maken; iedereen met de link kan 'm lezen en weggooien (dat gebeurt automatisch bij gebruik, zodat de link maar één keer werkt).
 - `beheerders/<uid>` bepaalt wie écht sitebeheerder is: alleen dat ene account mag zijn eigen regel lezen (om te checken of het 'm zelf is), en **niemand** kan er via de site bij schrijven (`.write: false`) — die regel zet jij zelf handmatig in de Firebase-console (zie hierboven), nooit via de app.
 - `accounts/<uid>` is het gewone account van een bezoeker (gebruikersnaam + de restaurants die diegene gemaakt heeft): alleen dat account zelf mag zijn eigen gegevens lezen én schrijven.
 
@@ -278,6 +296,13 @@ bans/
     sinds: <timestamp>,
     totEnMet: <timestamp>      ← afwezig/weggelaten = voor onbepaalde tijd geblokkeerd
   }
+verwijderd/
+  dev-abc123.../ {            ← apparaat-id van een verwijderde gebruiker
+    naam: "Sara",
+    tijdstip: <timestamp>
+  }
+uitnodigingen/
+  <token>/ { aangemaakt: <timestamp> }   ← eenmalige "nieuwe link"; wordt gewist zodra 'ie gebruikt is
 restaurants/
   K3F7Q/                      ← restaurantcode
     naam: "De Gouden Pan"
