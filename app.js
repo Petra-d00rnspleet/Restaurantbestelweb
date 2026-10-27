@@ -81,6 +81,7 @@ const state = {
   bestellingen: {},
   historie: {},
   categorieen: {},             // categorieën van het huidige restaurant
+  namen: {},                   // vaste namenlijst (Instellingen > Producten) om snel aan te klikken bij een bestelling zonder tafel
   leden: {},                  // teamleden van het huidige restaurant, met functie + rechten
   ledenGeladen: false,
   chat: {},                    // teamchat van het huidige restaurant: { berichtId: {ledId, naam, tekst, tijdstip} }
@@ -484,6 +485,7 @@ function verlaatHuidigRestaurant(){
   state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
+  state.namen = {};
   bekendeBestellingStatussen = null;
   toepassenThema(null);
   state.actiefInRestaurant = false;
@@ -794,6 +796,10 @@ function startRestaurant(){
     state.categorieen = snap.val() || {};
     render();
   });
+  db.ref("restaurants/" + code + "/namen").on("value", snap => {
+    state.namen = snap.val() || {};
+    render();
+  });
   // Teamchat: iedereen in dit restaurant leest live mee, ongeacht rechten.
   db.ref("restaurants/" + code + "/chat").on("value", snap => {
     state.chat = snap.val() || {};
@@ -933,6 +939,22 @@ function categorieToevoegen(naam){
     naam: naam,
     aangemaakt: firebase.database.ServerValue.TIMESTAMP,
   });
+}
+function namenGesorteerd(){
+  return Object.entries(state.namen || {}).sort((a,b) => (a[1].naam||"").localeCompare(b[1].naam||"", "nl"));
+}
+function naamToevoegen(naam){
+  naam = (naam || "").trim();
+  if(!naam) return;
+  const bestaatAl = Object.values(state.namen || {}).some(n => (n.naam||"").toLowerCase() === naam.toLowerCase());
+  if(bestaatAl){ toonToast("Deze naam staat al in de lijst"); return; }
+  db.ref("restaurants/" + state.restaurantCode + "/namen").push().set({
+    naam: naam,
+    aangemaakt: firebase.database.ServerValue.TIMESTAMP,
+  });
+}
+function naamVerwijderen(id){
+  db.ref("restaurants/" + state.restaurantCode + "/namen/" + id).remove();
 }
 function categorieVerwijderen(id){
   if(!confirm("Deze categorie verwijderen? Producten die deze categorie al hadden, blijven gewoon bestaan en verschijnen bij Bestellen nog steeds onder hun (oude) categorienaam.")) return;
@@ -1527,6 +1549,7 @@ function beheerRestaurantBezoeken(code){
   state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
+  state.namen = {};
   state.chat = {};
   bekendeBestellingStatussen = null;
   db.ref("restaurants/" + code + "/menu").on("value", snap => { state.menu = snap.val() || {}; render(); });
@@ -1537,6 +1560,7 @@ function beheerRestaurantBezoeken(code){
   db.ref("restaurants/" + code + "/waarschuwing").on("value", snap => { state.waarschuwing = snap.val() || null; render(); });
   db.ref("restaurants/" + code + "/plattegrond").on("value", snap => { state.plattegrond = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/categorieen").on("value", snap => { state.categorieen = snap.val() || {}; render(); });
+  db.ref("restaurants/" + code + "/namen").on("value", snap => { state.namen = snap.val() || {}; render(); });
   db.ref("restaurants/" + code + "/chat").on("value", snap => { state.chat = snap.val() || {}; render(); });
   render();
 }
@@ -1567,6 +1591,7 @@ function beheerRestaurantVerlaten(doorRender){
   state.waarschuwing = null;
   state.plattegrond = {};
   state.categorieen = {};
+  state.namen = {};
   state.chat = {};
   bekendeBestellingStatussen = null;
   state.actiefInRestaurant = false;
@@ -2547,7 +2572,9 @@ function renderBestellenProducten(){
             🍽️ Tafel ${actieveCel ? actieveCel.nummer : ""}
             ${actieveCel && actieveCel.bezet ? `<span class="tafel-status tafel-status--bezet">bezet</span>` : `<span class="tafel-status tafel-status--vrij">nog vrij</span>`}
           </div>
-        ` : `<input class="wagen__tafel" placeholder="Tafel / naam (optioneel)" value="${state.tafel}" data-action="tafel-invoer">`}
+        ` : `<input class="wagen__tafel" placeholder="Tafel / naam (optioneel)" value="${state.tafel}" data-action="tafel-invoer">
+        ${namenGesorteerd().length ? `<div class="naam-kiezer">${namenGesorteerd().map(([,n]) =>
+          `<button type="button" class="naam-kiezer__chip ${state.tafel===n.naam?'actief':''}" data-action="naam-kiezen" data-naam="${n.naam.replace(/"/g,'&quot;')}">${n.naam}</button>`).join("")}</div>` : ""}`}
         ${wagenHtml}
         <div class="wagen__totaal"><span>Totaal</span><span>${euro(totaal)}</span></div>
         <button class="btn btn--flame btn--block" data-action="verzend-bestelling" ${wagenItems.length?"":"disabled"}>Bestelling verzenden</button>
@@ -2909,6 +2936,17 @@ function renderInstellingenProducten(){
       <div class="categorie-form">
         <input id="nieuwe-categorie" placeholder="Nieuwe categorie, bijv. Dranken">
         <button class="btn btn--flame btn--sm" data-action="categorie-toevoegen">✨ Toevoegen</button>
+      </div>
+    </div>
+
+    <div class="instel-blok">
+      <div class="instel-blok__titel">👤 Namenlijst</div>
+      <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Zet hier namen van mensen neer. Bij een bestelling zonder tafel kun je zo'n naam dan gewoon aanklikken, in plaats van 'm te typen.</p>
+      <div class="categorie-lijst">${namenGesorteerd().length ? namenGesorteerd().map(([id,n]) => `
+        <span class="categorie-chip" style="--chip-icoon:'';">${n.naam}<button class="categorie-chip__x" data-action="naam-verwijder" data-id="${id}" title="Verwijderen">✕</button></span>`).join("") : `<div class="leeg">Nog geen namen toegevoegd.</div>`}</div>
+      <div class="categorie-form">
+        <input id="nieuwe-naam" placeholder="Nieuwe naam, bijv. Sara">
+        <button class="btn btn--flame btn--sm" data-action="naam-toevoegen">✨ Toevoegen</button>
       </div>
     </div>
 
@@ -3363,6 +3401,9 @@ root.addEventListener("click", e => {
       categorieToevoegen(document.getElementById("nieuwe-categorie").value);
       break;
     case "categorie-verwijder": categorieVerwijderen(id); break;
+    case "naam-toevoegen": naamToevoegen(document.getElementById("nieuwe-naam").value); break;
+    case "naam-verwijder": naamVerwijderen(id); break;
+    case "naam-kiezen": state.tafel = el.dataset.naam; render(); break;
 
     case "update-gelezen": updateGelezenMarkeren(id); break;
 
