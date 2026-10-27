@@ -15,6 +15,8 @@ const auth = firebase.auth();
 const eigenaarAuthApp = firebase.initializeApp(firebaseConfig, "eigenaarAuth");
 const eigenaarAuth = eigenaarAuthApp.auth();
 const root = document.getElementById("app");
+// Staat er ?nieuw=<token> in de link? Dan is dit een "nieuwe link" van sitebeheer (zie uitnodigingVerwerken).
+const uitnodigingToken = (new URLSearchParams(location.search).get("nieuw") || "").trim();
 
 // ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
 // Migreert automatisch vanaf de oude opslag (vóór meerdere restaurants per apparaat mogelijk waren).
@@ -94,6 +96,11 @@ const state = {
   siteNaamInvoerFout: "",
   geblokkeerd: null,               // { naam, sinds, totEnMet } als dit apparaat geblokkeerd is door sitebeheer, anders null
   geblokkeerdGecontroleerd: false, // is de eerste blokkade-check al binnengekomen? (voorkomt flitsen van de site vóór de check klaar is)
+  verwijderd: null,                // { naam, tijdstip } als dit apparaat/account door sitebeheer is verwijderd, anders null
+  verwijderdGecontroleerd: false,  // is de eerste verwijderd-check al binnengekomen?
+  verwijderdBerichtVerstuurd: false, // heeft een verwijderde gebruiker al een bericht naar sitebeheer gestuurd (deze sessie)?
+  uitnodigingStatus: "bezig",      // bezig | ongeldig — alleen relevant als de pagina geopend is met ?nieuw=<token>
+  laatsteUitnodigingUrl: "",       // de laatst gemaakte "nieuwe link" in Sitebeheer (om te kopiëren)
   gebruikersLijst: {},             // alle apparaten die ooit een naam hebben ingevuld (alleen geladen als het beheerpaneel open is)
   gebruikersLijstGeladen: false,
   bansLijst: {},                   // alle actieve/verlopen blokkades (alleen geladen als het beheerpaneel open is)
@@ -264,6 +271,8 @@ function siteNaamOpslaan(naam){
   render();
 }
 function gebruikerRegistreren(){
+  // Een verwijderd account mag zichzelf nooit opnieuw in de gebruikerslijst zetten.
+  if(state.verwijderd) return;
   // Let op: geen voorafgaande .once("value")-lees hier — dat mag voor gewone bezoekers
   // niet (gebruikers > .read staat alleen open voor ingelogde beheerders), dus dat zou hier
   // stil vastlopen voor iedereen behalve Sitebeheer zelf. In plaats daarvan onthouden we
@@ -1426,6 +1435,74 @@ function beheerGebruikerBlokkerenOneindig(apparaatId){
   if(!confirm(`"${naam}" voor onbepaalde tijd blokkeren?`)) return;
   beheerGebruikerBlokkeren(apparaatId, null, null);
 }
+// Verwijdert een gebruiker volledig: weg uit de gebruikerslijst (en blokkade/berichten), en het apparaat
+// krijgt een "verwijderd"-markering. Dat apparaat ziet daarna alleen nog het scherm "Je bent verwijderd"
+// tot het een nieuwe link van sitebeheer gebruikt (zie beheerUitnodigingMaken / uitnodigingVerwerken).
+function beheerGebruikerVerwijderen(apparaatId){
+  if(apparaatId === state.apparaatId){ toonToast("Je kunt je eigen apparaat niet verwijderen."); return; }
+  const gebruiker = state.gebruikersLijst[apparaatId];
+  const naam = gebruiker ? gebruiker.naam : apparaatId;
+  if(!confirm(`"${naam}" verwijderen? Het account wordt gewist en diegene komt op een scherm "Je bent verwijderd". Alleen met een nieuwe link van jou kan diegene een nieuw account maken.`)) return;
+  const updates = {};
+  updates["verwijderd/" + apparaatId] = { naam: naam, tijdstip: firebase.database.ServerValue.TIMESTAMP };
+  updates["gebruikers/" + apparaatId] = null;
+  updates["bans/" + apparaatId] = null;
+  db.ref().update(updates).then(() => toonToast(`${naam} verwijderd`));
+}
+// Maakt een eenmalige "nieuwe link" voor iemand die verwijderd is.
+function beheerUitnodigingMaken(){
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  let token = "";
+  for(let i=0;i<20;i++) token += chars[Math.floor(Math.random()*chars.length)];
+  db.ref("uitnodigingen/" + token).set({ aangemaakt: firebase.database.ServerValue.TIMESTAMP }).then(() => {
+    state.laatsteUitnodigingUrl = location.origin + location.pathname.replace(/index\.html$/, "") + "?nieuw=" + token;
+    navigator.clipboard?.writeText(state.laatsteUitnodigingUrl);
+    toonToast("Nieuwe link gemaakt en gekopieerd");
+    render();
+  });
+}
+// Een verwijderde gebruiker stuurt sitebeheer een bericht (via het bestaande feedback-kanaal).
+function verwijderdBerichtVersturen(tekst){
+  tekst = (tekst || "").trim();
+  if(!tekst || state.verwijderdBerichtVerstuurd) return;
+  db.ref("feedback").push({
+    afzender: ((state.verwijderd && state.verwijderd.naam) || "(onbekend)") + " (verwijderd)",
+    tekst: tekst,
+    tijdstip: firebase.database.ServerValue.TIMESTAMP,
+  }).then(() => {
+    state.verwijderdBerichtVerstuurd = true;
+    toonToast("Bericht verstuurd naar sitebeheer");
+    render();
+  });
+}
+// Ruimt dit apparaat op na een verwijdering: haalt de teamlid-accounts van dit apparaat uit alle
+// restaurants en wist alle lokale gegevens (naam, restaurantlijst). Geeft een Promise terug.
+function apparaatOpruimen(){
+  if(state.actiefInRestaurant && !state.beheerBezoekModus) verlaatHuidigRestaurant();
+  const restaurants = [...state.mijnRestaurants];
+  restaurants.forEach(r => mijnRestaurantsEigenaarSyncStoppen(r.code));
+  const acties = restaurants.filter(r => r.ledId).map(r =>
+    db.ref("restaurants/" + r.code + "/leden/" + r.ledId).remove().catch(() => {})
+  );
+  state.mijnRestaurants = [];
+  state.siteGebruikersNaam = null;
+  ["ticket_restaurants","ticket_site_naam","ticket_gelezen_updates"].forEach(k => localStorage.removeItem(k));
+  return Promise.all(acties);
+}
+// Verwerkt een "nieuwe link" (?nieuw=<token>): als de link geldig is, wordt 'ie meteen verbruikt en
+// krijgt dit apparaat een gloednieuw apparaat-id, zodat het als een nieuwe gebruiker begint.
+function uitnodigingVerwerken(){
+  if(!uitnodigingToken) return;
+  db.ref("uitnodigingen/" + uitnodigingToken).once("value").then(snap => {
+    if(!snap.exists()){ state.uitnodigingStatus = "ongeldig"; render(); return; }
+    return db.ref("uitnodigingen/" + uitnodigingToken).remove()
+      .then(() => apparaatOpruimen())
+      .then(() => {
+        localStorage.removeItem("ticket_apparaat_id");
+        location.replace(location.pathname);
+      });
+  }).catch(() => { state.uitnodigingStatus = "ongeldig"; render(); });
+}
 // Heft een blokkade op — werkt ook voor een blokkade die op "oneindig" stond.
 function beheerGebruikerDeblokkeren(apparaatId){
   const gebruiker = state.gebruikersLijst[apparaatId];
@@ -1731,7 +1808,12 @@ function render(){
 function renderScherm(){
   // Blokkade-check gaat altijd voor: nog niet binnengekomen? Toon even niets ingrijpends
   // (voorkomt dat de site al even zichtbaar is vóór we weten of dit apparaat geblokkeerd is).
-  if(!state.geblokkeerdGecontroleerd){
+  // Geopend via een "nieuwe link" van sitebeheer (?nieuw=<token>)? Dan handelen we eerst die af.
+  if(uitnodigingToken){
+    renderUitnodiging();
+    return;
+  }
+  if(!state.geblokkeerdGecontroleerd || !state.verwijderdGecontroleerd){
     root.innerHTML = `
       <div class="landing">
         <div class="landing__mark">
@@ -1751,6 +1833,10 @@ function renderScherm(){
   }
   if(state.beheerBezoekModus){
     renderDashboard();
+    return;
+  }
+  if(state.verwijderd){
+    renderVerwijderd();
     return;
   }
   if(state.geblokkeerd){
@@ -1788,6 +1874,51 @@ function renderSiteNaamGate(){
     </div>`;
   const verstuur = () => siteNaamOpslaan(document.getElementById("input-site-naam").value);
   document.getElementById("input-site-naam").addEventListener("keydown", e => { if(e.key === "Enter") verstuur(); });
+}
+// Scherm voor een verwijderd account: geen toegang meer tot de site, tot sitebeheer een nieuwe link geeft.
+function renderVerwijderd(){
+  const verstuurd = state.verwijderdBerichtVerstuurd;
+  root.innerHTML = `
+    <div class="landing">
+      <div class="landing__mark">
+        <div class="landing__eyebrow">${MERKNAAM}</div>
+        <h1 class="landing__title">Je bent verwijderd</h1>
+        <div class="landing__divider"><span class="landing__diamond"></span></div>
+      </div>
+      <div class="form-card">
+        <p>Je bent verwijderd uit ${MERKNAAM} en je account bestaat niet meer.</p>
+        <p style="color:var(--text-dim); font-size:.85rem;">Vraag een nieuwe link aan sitebeheer om er weer in te komen. Met die link kun je een nieuw account maken.</p>
+        <textarea id="verwijderd-bericht-tekst" rows="3" placeholder="Optioneel: stuur sitebeheer een bericht om een nieuwe link te vragen…" ${verstuurd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
+        <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="verwijderd-bericht-versturen" ${verstuurd?"disabled":""}>${verstuurd ? "Bericht verstuurd" : "Versturen"}</button>
+      </div>
+      <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
+    </div>`;
+}
+// Scherm tijdens het verwerken van een "nieuwe link" (?nieuw=<token>), of als die link niet (meer) geldig is.
+function renderUitnodiging(){
+  if(state.uitnodigingStatus === "ongeldig"){
+    root.innerHTML = `
+      <div class="landing">
+        <div class="landing__mark">
+          <div class="landing__eyebrow">${MERKNAAM}</div>
+          <h1 class="landing__title">Link ongeldig</h1>
+          <div class="landing__divider"><span class="landing__diamond"></span></div>
+        </div>
+        <div class="form-card">
+          <p>Deze link is ongeldig of al gebruikt. Vraag sitebeheer om een nieuwe link.</p>
+          <button class="btn btn--flame btn--block" data-action="uitnodiging-negeren">Naar het startscherm</button>
+        </div>
+      </div>`;
+    return;
+  }
+  root.innerHTML = `
+    <div class="landing">
+      <div class="landing__mark">
+        <div class="landing__eyebrow">Even geduld</div>
+        <h1 class="landing__title">Nieuw account maken…</h1>
+        <div class="landing__divider"><span class="landing__diamond"></span></div>
+      </div>
+    </div>`;
 }
 // Aparte pagina die een geblokkeerd apparaat te zien krijgt in plaats van de rest van de site —
 // blijft zichtbaar totdat de dagen om zijn of sitebeheer de blokkade opheft.
@@ -2103,6 +2234,7 @@ function renderBeheerPaneel(){
             </div>
             <div class="beheer-rest-rij__acties">
               ${chatToggleHtml}
+              <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-verwijderen" data-id="${apparaatId}">🗑️ Verwijderen</button>
               ${nogActief
                 ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
                 : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${apparaatId}">Timeout (minuten)</button>
@@ -2186,6 +2318,17 @@ function renderBeheerPaneel(){
         <div class="instel-blok">
           <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Iedereen die ooit een naam heeft ingevuld op het startscherm. Een blokkade is gekoppeld aan het apparaat, dus een andere naam invullen helpt niet om 'm te omzeilen.</p>
           <div class="beheer-rest-lijst">${gebruikersHtml}</div>
+        </div>
+
+        <h2 class="view-titel">🔗 Nieuwe link voor verwijderde gebruikers</h2>
+        <div class="instel-blok">
+          <p style="color:var(--text-dim); font-size:.8rem; margin:-4px 0 14px;">Maak een eenmalige link en stuur die naar iemand die je hebt verwijderd. Met die link maakt diegene een nieuw account. De link werkt maar één keer.</p>
+          <button class="btn btn--flame btn--sm" data-action="beheer-uitnodiging-maken">Nieuwe link maken</button>
+          ${state.laatsteUitnodigingUrl ? `
+            <div class="qr-link-tonen" style="margin-top:12px;">
+              <input readonly value="${state.laatsteUitnodigingUrl}">
+              <button class="btn btn--ghost btn--sm" data-action="beheer-uitnodiging-kopieren">Link kopiëren</button>
+            </div>` : ""}
         </div>
 
         <h2 class="view-titel">💬 Feedback van eigenaren</h2>
@@ -3232,6 +3375,14 @@ root.addEventListener("click", e => {
     case "gebruiker-blokkeren-dagen": beheerGebruikerBlokkerenDagen(id); break;
     case "gebruiker-blokkeren-oneindig": beheerGebruikerBlokkerenOneindig(id); break;
     case "gebruiker-deblokkeren": beheerGebruikerDeblokkeren(id); break;
+    case "gebruiker-verwijderen": beheerGebruikerVerwijderen(id); break;
+    case "beheer-uitnodiging-maken": beheerUitnodigingMaken(); break;
+    case "beheer-uitnodiging-kopieren":
+      navigator.clipboard?.writeText(state.laatsteUitnodigingUrl);
+      toonToast("Link gekopieerd");
+      break;
+    case "verwijderd-bericht-versturen": verwijderdBerichtVersturen(document.getElementById("verwijderd-bericht-tekst").value); break;
+    case "uitnodiging-negeren": location.replace(location.pathname); break;
   }
 });
 
@@ -3281,7 +3432,22 @@ db.ref("bans/" + state.apparaatId).on("value", snap => {
 });
 // Als dit apparaat al eerder een naam heeft ingevuld, meteen de gebruikerslijst bijwerken
 // (laatste bezoek) — zo blijft Sitebeheer > Gebruikers actueel.
-if(state.siteGebruikersNaam) gebruikerRegistreren();
+// (pas nadat bekend is dat dit apparaat niet verwijderd is — zie de verwijderd-listener hieronder)
+let gebruikerStartRegistratieGedaan = false;
+// Verwijderd-check voor dit apparaat: altijd actief. Zodra sitebeheer iemand verwijdert, ziet die
+// persoon meteen (live) het scherm "Je bent verwijderd" en wordt het apparaat opgeruimd.
+db.ref("verwijderd/" + state.apparaatId).on("value", snap => {
+  const wasVerwijderd = !!state.verwijderd;
+  state.verwijderd = snap.val() || null;
+  state.verwijderdGecontroleerd = true;
+  if(state.verwijderd && !wasVerwijderd && !uitnodigingToken) apparaatOpruimen();
+  if(!state.verwijderd && !gebruikerStartRegistratieGedaan){
+    gebruikerStartRegistratieGedaan = true;
+    if(state.siteGebruikersNaam) gebruikerRegistreren();
+  }
+  render();
+});
+uitnodigingVerwerken();
 // Houdt de sitebeheer-status bij op basis van Firebase Authentication (server-side gecontroleerd,
 // niet meer via localStorage) — vuurt ook meteen bij het laden als je nog een geldige sessie hebt.
 auth.onAuthStateChanged(gebruiker => {
