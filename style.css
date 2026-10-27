@@ -1678,3 +1678,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
   .choice-card{ width:100% !important; }
   .product-grid{ grid-template-columns:repeat(auto-fill, minmax(110px,1fr)); }
 }
+
+/* Namenlijst: snel aanklikbare namen bij een bestelling zonder tafel */
+.naam-kiezer{ display:flex; flex-wrap:wrap; gap:6px; margin:-6px 0 14px; }
+.naam-kiezer__chip{
+  background:var(--bg-2);
+  border:1px solid var(--line);
+  color:var(--text);
+  border-radius:20px;
+  padding:5px 12px;
+  font-size:.8rem;
+}
+.naam-kiezer__chip:hover{ border-color:var(--flame); }
+.naam-kiezer__chip.actief{ background:var(--flame); border-color:var(--flame); color:#1a0f08; }
