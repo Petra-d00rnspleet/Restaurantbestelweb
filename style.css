@@ -1712,3 +1712,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 .taal-kiezer select:focus-visible{ outline:2px solid var(--flame); outline-offset:2px; }
 .landing > .taal-kiezer{ position:absolute; top:14px; right:14px; }
 .topbar .taal-kiezer{ margin-left:auto; }
+
+
+/* Sitebreed accountvak */
+.site-account-bar{position:relative;z-index:20;display:flex;justify-content:flex-end;align-items:center;padding:10px 18px;background:var(--bg-2);border-bottom:1px solid var(--line);gap:10px}
+.site-account-user{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;font-size:.85rem;color:var(--text-dim)}
+.site-account-card{width:min(420px,94vw);background:var(--panel);border:1px solid var(--line);padding:18px;border-radius:var(--radius);box-shadow:0 12px 40px #0008;display:flex;flex-direction:column;gap:8px}
+.site-account-card strong{font-family:var(--display);font-size:1.25rem;margin-bottom:8px}
+.site-account-card input:not([type=checkbox]){width:100%;background:var(--bg-2);border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:var(--radius);margin-bottom:8px}
+.site-account-check{display:flex;align-items:flex-start;gap:8px;font-size:.82rem;color:var(--text-dim);margin:5px 0 10px}
+.site-account-check input{margin-top:3px;flex-shrink:0}
+.site-account-error{color:var(--ember);font-size:.82rem;line-height:1.45}
+.site-account-bar:has(.site-account-card){justify-content:center;padding:14px}
+@media(max-width:560px){.site-account-bar{padding:8px}.site-account-user{justify-content:center}.site-account-user .btn{font-size:.72rem;padding:7px 9px}}
