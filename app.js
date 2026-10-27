@@ -15,8 +15,43 @@ const auth = firebase.auth();
 const eigenaarAuthApp = firebase.initializeApp(firebaseConfig, "eigenaarAuth");
 const eigenaarAuth = eigenaarAuthApp.auth();
 const root = document.getElementById("app");
+
+// ---------- beveiligingshulpjes ----------
+// esc(): maakt tekst die uit de database komt veilig om in HTML te zetten. Alles wat een
+// gebruiker kan typen (namen, notities, chat, ...) gaat hier doorheen vóór het in innerHTML komt.
+function esc(w){
+  return String(w == null ? "" : w)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+// Veilige willekeurige tekens (crypto i.p.v. Math.random, dat voorspelbaar is).
+function willekeurigeTekens(n, chars){
+  chars = chars || "abcdefghijklmnopqrstuvwxyz0123456789";
+  const bytes = new Uint32Array(n);
+  crypto.getRandomValues(bytes);
+  let uit = "";
+  for(let i = 0; i < n; i++) uit += chars[bytes[i] % chars.length];
+  return uit;
+}
+// Een restaurantcode bestaat alleen uit hoofdletters en cijfers (4–10 tekens).
+function codeGeldig(c){ return /^[A-Z0-9]{4,10}$/.test(c || ""); }
+// Prijs: 0 t/m 9999, max. 2 decimalen — anders null.
+function prijsParsen(w){
+  const n = parseFloat(String(w).replace(",", "."));
+  return (isFinite(n) && n >= 0 && n <= 9999) ? Math.round(n * 100) / 100 : null;
+}
+// Een schrijfactie die door de databaseregels geweigerd wordt (of zonder verbinding mislukt)
+// geeft anders nergens een melding. Deze vangt dat centraal op.
+window.addEventListener("unhandledrejection", e => {
+  const r = e.reason || {};
+  const msg = String(r.code || r.message || "");
+  if(/permission[_ ]denied/i.test(msg)) toonToast("Opslaan niet toegestaan — controleer de ingevulde gegevens.");
+  else if(/network|disconnect|offline/i.test(msg)) toonToast("Geen verbinding met de server.");
+  else return;
+  e.preventDefault();
+});
 // Staat er ?nieuw=<token> in de link? Dan is dit een "nieuwe link" van sitebeheer (zie uitnodigingVerwerken).
-const uitnodigingToken = (new URLSearchParams(location.search).get("nieuw") || "").trim();
+const uitnodigingToken = (new URLSearchParams(location.search).get("nieuw") || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40);
 
 // ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
 // Migreert automatisch vanaf de oude opslag (vóór meerdere restaurants per apparaat mogelijk waren).
@@ -53,7 +88,7 @@ function laadGelezenUpdates(){
 function laadApparaatId(){
   let id = localStorage.getItem("ticket_apparaat_id");
   if(!id){
-    id = "dev-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2,10);
+    id = "dev-" + Date.now().toString(36) + "-" + willekeurigeTekens(12);
     localStorage.setItem("ticket_apparaat_id", id);
     apparaatIsNieuw = true;
   }
@@ -95,6 +130,8 @@ const state = {
   apparaatId: laadApparaatId(),           // blijvend, willekeurig id van dit apparaat/deze browser
   siteGebruikersNaam: localStorage.getItem("ticket_site_naam") || null, // naam die je invult vóór je de site in mag
   siteNaamInvoerFout: "",
+  verbonden: true,                 // false zodra de verbinding met Firebase wegvalt
+  verbondenGeweest: false,         // pas een offline-melding tonen nadat we eerst echt verbonden waren
   geblokkeerd: null,               // { naam, sinds, totEnMet } als dit apparaat geblokkeerd is door sitebeheer, anders null
   geblokkeerdGecontroleerd: false, // is de eerste blokkade-check al binnengekomen? (voorkomt flitsen van de site vóór de check klaar is)
   verwijderd: null,                // { naam, tijdstip } als dit apparaat/account door sitebeheer is verwijderd, anders null
@@ -311,8 +348,8 @@ function patroonAchtergrondUrl(patroonKey){
   const optie = PATROON_OPTIES.find(p => p.key === patroonKey);
   if(!optie || !optie.emoji) return "";
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>` +
-    `<text x='12' y='48' font-size='42' opacity='0.22'>${optie.emoji}</text>` +
-    `<text x='82' y='118' font-size='42' opacity='0.22'>${optie.emoji}</text>` +
+    `<text x='12' y='48' font-size='42' opacity='0.22'>${esc(optie.emoji)}</text>` +
+    `<text x='82' y='118' font-size='42' opacity='0.22'>${esc(optie.emoji)}</text>` +
     `</svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
@@ -545,10 +582,8 @@ function heeftRecht(sleutel){
   return !!(lid.rechten && lid.rechten[sleutel]);
 }
 function genereerCode(){
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // zonder verwarrende tekens
-  let code = "";
-  for(let i=0;i<5;i++) code += chars[Math.floor(Math.random()*chars.length)];
-  return code;
+  // 8 tekens (was 5): ~1 biljoen mogelijkheden i.p.v. 33 miljoen, dus niet te raden. Zonder verwarrende tekens.
+  return willekeurigeTekens(8, "ABCDEFGHJKLMNPQRSTUVWXYZ23456789");
 }
 function euro(bedrag){
   return "€ " + Number(bedrag).toFixed(2).replace(".", ",");
@@ -584,8 +619,8 @@ function eigenaarInloggenOfRegistreren(modus, email, wachtwoord){
     state.eigenaarAuthFoutmelding = "Vul e-mailadres en wachtwoord in.";
     render(); return;
   }
-  if(modus === "registreren" && wachtwoord.length < 6){
-    state.eigenaarAuthFoutmelding = "Kies een wachtwoord van minstens 6 tekens.";
+  if(modus === "registreren" && wachtwoord.length < 8){
+    state.eigenaarAuthFoutmelding = "Kies een wachtwoord van minstens 8 tekens.";
     render(); return;
   }
   state.eigenaarAuthBezig = true;
@@ -607,10 +642,17 @@ function eigenaarInloggenOfRegistreren(modus, email, wachtwoord){
     else if(err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") state.eigenaarAuthFoutmelding = "Onjuist e-mailadres of wachtwoord.";
     else if(err.code === "auth/user-not-found") state.eigenaarAuthFoutmelding = "Geen account gevonden met dit e-mailadres — klik op 'Account aanmaken'.";
     else if(err.code === "auth/invalid-email") state.eigenaarAuthFoutmelding = "Vul een geldig e-mailadres in.";
-    else if(err.code === "auth/weak-password") state.eigenaarAuthFoutmelding = "Kies een wachtwoord van minstens 6 tekens.";
+    else if(err.code === "auth/weak-password") state.eigenaarAuthFoutmelding = "Kies een wachtwoord van minstens 8 tekens.";
     else state.eigenaarAuthFoutmelding = "Er ging iets mis: " + err.message;
     render();
   });
+}
+function eigenaarWachtwoordReset(email){
+  email = (email || "").trim();
+  if(!email){ state.eigenaarAuthFoutmelding = "Vul eerst je e-mailadres in."; render(); return; }
+  // Altijd dezelfde melding, of het adres nu bestaat of niet (zo kan niemand uitvissen wie een account heeft).
+  const klaar = () => { state.eigenaarAuthFoutmelding = "Als dit e-mailadres bekend is, is er een e-mail gestuurd om je wachtwoord te herstellen."; render(); };
+  eigenaarAuth.sendPasswordResetEmail(email).then(klaar).catch(klaar);
 }
 function eigenaarUitloggen(){
   eigenaarAuth.signOut();
@@ -646,7 +688,6 @@ function restaurantMaken(naam, eigenNaam){
         eigenaar: true,
         rechten: { bestellen:true, keuken:true, bezorgen:true, historie:true, instellingen:true },
         aangemaakt: firebase.database.ServerValue.TIMESTAMP,
-        eigenaarEmail: eigenaarAuth.currentUser ? eigenaarAuth.currentUser.email : null,
         eigenaarUid: eigenaarAuth.currentUser ? eigenaarAuth.currentUser.uid : null,
       }),
       catRef.set({ naam: "Overig", aangemaakt: firebase.database.ServerValue.TIMESTAMP }),
@@ -664,6 +705,7 @@ function restaurantJoinen(codeInvoer, eigenNaam){
   const code = codeInvoer.trim().toUpperCase();
   eigenNaam = (eigenNaam || "").trim();
   if(!code){ state.foutmelding = "Vul een code in."; render(); return; }
+  if(!codeGeldig(code)){ state.foutmelding = "Een restaurantcode bestaat uit 4 tot 10 letters/cijfers."; render(); return; }
   if(!eigenNaam){ state.foutmelding = "Vul je naam in."; render(); return; }
   const bestaandLid = state.mijnRestaurants.find(r => r.code === code);
   if(bestaandLid){
@@ -811,6 +853,7 @@ function startRestaurant(){
 function bestellingVerzenden(){
   const items = Object.values(state.winkelwagen);
   if(items.length === 0) return;
+  if(!state.verbonden){ toonToast("Geen verbinding met de server — bestelling nog niet verstuurd."); return; }
   const ref = db.ref("restaurants/" + state.restaurantCode + "/bestellingen").push();
   ref.set({
     items: items,
@@ -870,13 +913,14 @@ function historieWissen(){
 function menuItemToevoegen(naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
   naam = naam.trim();
   if(!naam || !prijs || !categorie) return;
+  if(prijsParsen(prijs) === null){ toonToast("Vul een geldige prijs in (0 t/m 9999)."); return; }
   if(naam.length > MAX_LETTERS_PRODUCTNAAM){
     toonToast(`Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.`);
     return;
   }
   db.ref("restaurants/" + state.restaurantCode + "/menu").push().set({
     naam: naam,
-    prijs: parseFloat(prijs.replace(",", ".")) || 0,
+    prijs: prijsParsen(prijs),
     categorie: categorie,
     emoji: emoji || "🍽️",
     ijsKeuze: !!ijsKeuze,
@@ -907,13 +951,14 @@ function menuItemBewerkAnnuleren(){
 function menuItemBewerkOpslaan(id, naam, prijs, categorie, emoji, ijsKeuze, slagroomKeuze, glasKeuze){
   naam = (naam || "").trim();
   if(!naam || !prijs || !categorie) return;
+  if(prijsParsen(prijs) === null){ toonToast("Vul een geldige prijs in (0 t/m 9999)."); return; }
   if(naam.length > MAX_LETTERS_PRODUCTNAAM){
     toonToast(`Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.`);
     return;
   }
   db.ref("restaurants/" + state.restaurantCode + "/menu/" + id).update({
     naam: naam,
-    prijs: parseFloat(prijs.replace(",", ".")) || 0,
+    prijs: prijsParsen(prijs),
     categorie: categorie,
     emoji: emoji || "🍽️",
     ijsKeuze: !!ijsKeuze,
@@ -933,6 +978,7 @@ function categorieenGesorteerd(){
 function categorieToevoegen(naam){
   naam = (naam || "").trim();
   if(!naam) return;
+  if(naam.length > 40){ toonToast("Maximaal 40 tekens."); return; }
   const bestaatAl = Object.values(state.categorieen || {}).some(c => (c.naam||"").toLowerCase() === naam.toLowerCase());
   if(bestaatAl){ toonToast("Deze categorie bestaat al"); return; }
   db.ref("restaurants/" + state.restaurantCode + "/categorieen").push().set({
@@ -946,6 +992,7 @@ function namenGesorteerd(){
 function naamToevoegen(naam){
   naam = (naam || "").trim();
   if(!naam) return;
+  if(naam.length > 40){ toonToast("Maximaal 40 tekens."); return; }
   const bestaatAl = Object.values(state.namen || {}).some(n => (n.naam||"").toLowerCase() === naam.toLowerCase());
   if(bestaatAl){ toonToast("Deze naam staat al in de lijst"); return; }
   db.ref("restaurants/" + state.restaurantCode + "/namen").push().set({
@@ -975,7 +1022,7 @@ function updateGelezenMarkeren(id){
 // dat specifieke teamlid uitzet (zie ledChatToggle hierboven, in te stellen bij Team & rechten).
 // Wie geblokkeerd is, kan de chat nog wel gewoon lezen — alleen versturen lukt dan niet meer.
 function chatBerichtVersturen(tekst){
-  tekst = (tekst || "").trim();
+  tekst = (tekst || "").trim().slice(0, 300);
   if(!tekst) return;
   const eigenLid = state.leden[state.ledId];
   if(eigenLid && eigenLid.chatGeblokkeerd){
@@ -996,7 +1043,7 @@ function chatBerichtVersturen(tekst){
 
 // ---------- team & rechten (alleen te beheren door de eigenaar van het restaurant) ----------
 function ledFunctieWijzigen(ledId, functie){
-  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/functie").set(functie.trim());
+  db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/functie").set(functie.trim().slice(0, 40));
 }
 function ledRechtToggle(ledId, recht, waarde){
   db.ref("restaurants/" + state.restaurantCode + "/leden/" + ledId + "/rechten/" + recht).set(waarde);
@@ -1147,7 +1194,7 @@ function eigenNaamWijzigen(nieuweNaam){
 // plattegrond-symbool — dat mee kan draaien met obj.rotatie, zonder er ooit "op zijn kop" uit
 // te zien zoals een geroteerd 🪑-emoji zou doen.
 function stoelIconHtml(rotatie){
-  return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${rotatie||0}deg);">
+  return `<span class="plattegrond__stoel-icoon" style="transform:rotate(${Number(rotatie)||0}deg);">
     <span class="plattegrond__stoel-icoon__rug"></span>
     <span class="plattegrond__stoel-icoon__zit"></span>
   </span>`;
@@ -1323,7 +1370,7 @@ function sitebeheerPogingVerwijderen(id){
 // Geen wachttijd: iedereen kan hier gewoon zo vaak sturen als nodig is — als sitebeheer spam wil
 // voorkomen, kan dat via een blokkade van dat apparaat (zie hieronder).
 function feedbackVersturen(tekst){
-  tekst = (tekst || "").trim();
+  tekst = (tekst || "").trim().slice(0, 1000);
   if(!tekst) return;
   db.ref("feedback").push({
     afzender: state.gebruikersNaam || state.siteGebruikersNaam || "(onbekend)",
@@ -1353,7 +1400,7 @@ function feedbackVerwijderen(id){
 // sitebeheer totdat sitebeheer de berichtenfunctie voor dat apparaat expliciet uitzet
 // (zie beheerBanBerichtenBlokkeren hieronder) — dat is de enige rem op dit kanaal.
 function banBerichtVersturenGebruiker(tekst){
-  tekst = (tekst || "").trim();
+  tekst = (tekst || "").trim().slice(0, 500);
   if(!tekst || !state.geblokkeerd) return;
   if(state.geblokkeerd.berichtenGeblokkeerd){
     toonToast("Sitebeheer heeft de berichtenfunctie voor jou uitgezet.");
@@ -1385,7 +1432,7 @@ function beheerBanChatVerwijderen(apparaatId){
 }
 // Antwoord van sitebeheer terug naar een geblokkeerd apparaat.
 function banBerichtVersturenBeheer(apparaatId, tekst){
-  tekst = (tekst || "").trim();
+  tekst = (tekst || "").trim().slice(0, 500);
   if(!tekst) return;
   db.ref("bans/" + apparaatId + "/berichten").push({
     van: "beheer",
@@ -1473,9 +1520,7 @@ function beheerGebruikerVerwijderen(apparaatId){
 }
 // Maakt een eenmalige "nieuwe link" voor iemand die verwijderd is.
 function beheerUitnodigingMaken(){
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  let token = "";
-  for(let i=0;i<20;i++) token += chars[Math.floor(Math.random()*chars.length)];
+  const token = willekeurigeTekens(32, "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789");
   db.ref("uitnodigingen/" + token).set({ aangemaakt: firebase.database.ServerValue.TIMESTAMP }).then(() => {
     state.laatsteUitnodigingUrl = location.origin + location.pathname.replace(/index\.html$/, "") + "?nieuw=" + token;
     navigator.clipboard?.writeText(state.laatsteUitnodigingUrl);
@@ -1485,7 +1530,7 @@ function beheerUitnodigingMaken(){
 }
 // Een verwijderde gebruiker stuurt sitebeheer een bericht (via het bestaande feedback-kanaal).
 function verwijderdBerichtVersturen(tekst){
-  tekst = (tekst || "").trim();
+  tekst = (tekst || "").trim().slice(0, 500);
   if(!tekst || state.verwijderdBerichtVerstuurd) return;
   db.ref("feedback").push({
     afzender: ((state.verwijderd && state.verwijderd.naam) || "(onbekend)") + " (verwijderd)",
@@ -1621,7 +1666,7 @@ function beheerRestaurantWaarschuwen(code){
   const bestaande = gegevens && gegevens.waarschuwing ? gegevens.waarschuwing.tekst : "";
   const tekst = prompt(`Waarschuwing versturen naar "${naam}" (${code}):`, bestaande || "");
   if(tekst === null) return;
-  const schoon = tekst.trim();
+  const schoon = tekst.trim().slice(0, 300);
   if(!schoon){ toonToast("Geen waarschuwing verstuurd — tekst was leeg."); return; }
   db.ref("restaurants/" + code + "/waarschuwing").set({
     tekst: schoon,
@@ -1647,7 +1692,7 @@ function beheerRestaurantNaamLimiet(code){
     return;
   }
   const limiet = parseInt(schoon, 10);
-  if(!limiet || limiet < 1){ toonToast("Vul een geldig aantal letters in (1 of meer), of laat leeg voor standaard."); return; }
+  if(!limiet || limiet < 1 || limiet > 60){ toonToast("Vul een geldig aantal letters in (1 of meer), of laat leeg voor standaard."); return; }
   db.ref("restaurants/" + code + "/naamLimiet").set(limiet).then(() => toonToast(`Naamlimiet van ${naam} ingesteld op ${limiet} letters`));
 }
 // Sluit de waarschuwing-banner vanuit het restaurant zelf (door een teamlid) — verwijdert 'm
@@ -1658,8 +1703,8 @@ function waarschuwingSluiten(){
 }
 function siteUpdateToevoegen(titel, tekst){
   if(!state.beheerderActief) return;
-  titel = (titel || "").trim();
-  tekst = tekst.trim();
+  titel = (titel || "").trim().slice(0, 100);
+  tekst = tekst.trim().slice(0, 500);
   if(!tekst) return;
   db.ref("site_updates").push().set({
     titel: titel,
@@ -1682,8 +1727,8 @@ function siteUpdateBewerkAnnuleren(){
 }
 function siteUpdateBewerkOpslaan(id, titel, tekst){
   if(!state.beheerderActief) return;
-  titel = (titel || "").trim();
-  tekst = (tekst || "").trim();
+  titel = (titel || "").trim().slice(0, 100);
+  tekst = (tekst || "").trim().slice(0, 500);
   if(!tekst) return;
   db.ref("site_updates/" + id).update({ titel: titel, tekst: tekst })
     .then(() => { state.bewerkSiteUpdateId = null; render(); });
@@ -1704,7 +1749,7 @@ function toevoegenAanWagen(id, item){
     state.winkelwagen[id].aantal += 1;
   } else {
     state.winkelwagen[id] = {
-      naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", categorie:item.categorie||"Overig",
+      menuId:id, naam:item.naam, prijs:item.prijs, emoji:item.emoji||"🍽️", categorie:item.categorie||"Overig",
       aantal:1, notitie:"",
       ijsKeuze: !!item.ijsKeuze,
       slagroomKeuze: !!item.slagroomKeuze,
@@ -1748,7 +1793,7 @@ function itemExtraHtml(it){
   if(it.ijs) delen.push("🧊 Met ijs");
   if(it.slagroom) delen.push("🥛 Met slagroom");
   if(it.glas) delen.push("🥂 Heeft al een glas");
-  if(it.notitie) delen.push(it.notitie);
+  if(it.notitie) delen.push(esc(it.notitie));
   return delen.length ? `<span class="ticket__item-notitie">— ${delen.join(" · ")}</span>` : "";
 }
 
@@ -1766,10 +1811,10 @@ function qrPrinten(){
   const printVak = document.createElement("div");
   printVak.id = "print-qr-vak";
   printVak.innerHTML = `
-    <div class="print-qr__naam">${state.restaurantNaam}</div>
+    <div class="print-qr__naam">${esc(state.restaurantNaam)}</div>
     <img id="print-qr-img" src="${bronImg.src}" alt="QR-code om zelf te bestellen">
     <div class="print-qr__uitleg">Scan om zelf te bestellen</div>
-    <div class="print-qr__code">Code: ${state.restaurantCode}</div>
+    <div class="print-qr__code">Code: ${esc(state.restaurantCode)}</div>
   `;
   document.body.appendChild(printVak);
   const opruimen = () => { printVak.remove(); window.removeEventListener("afterprint", opruimen); };
@@ -1893,7 +1938,7 @@ function renderSiteNaamGate(){
         <label class="form-card__label">Hoe mogen we je noemen?</label>
         <input id="input-site-naam" type="text" placeholder="Bijv. Sara" maxlength="${MAX_LETTERS_SITE_NAAM}" autofocus>
         <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Vul je naam in om verder te gaan naar ${MERKNAAM}.</p>
-        ${state.siteNaamInvoerFout ? `<div class="fout">${state.siteNaamInvoerFout}</div>` : ""}
+        ${state.siteNaamInvoerFout ? `<div class="fout">${esc(state.siteNaamInvoerFout)}</div>` : ""}
         <button class="btn btn--flame btn--block" data-action="site-naam-opslaan">Doorgaan</button>
       </div>
     </div>`;
@@ -1913,7 +1958,7 @@ function renderVerwijderd(){
       <div class="form-card">
         <p>Je bent verwijderd uit ${MERKNAAM} en je account bestaat niet meer.</p>
         <p style="color:var(--text-dim); font-size:.85rem;">Vraag een nieuwe link aan sitebeheer om er weer in te komen. Met die link kun je een nieuw account maken.</p>
-        <textarea id="verwijderd-bericht-tekst" rows="3" placeholder="Optioneel: stuur sitebeheer een bericht om een nieuwe link te vragen…" ${verstuurd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
+        <textarea id="verwijderd-bericht-tekst" rows="3" maxlength="500" placeholder="Optioneel: stuur sitebeheer een bericht om een nieuwe link te vragen…" ${verstuurd?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
         <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="verwijderd-bericht-versturen" ${verstuurd?"disabled":""}>${verstuurd ? "Bericht verstuurd" : "Versturen"}</button>
       </div>
       <button class="terug-link" data-action="beheer-open">⚙ Sitebeheer</button>
@@ -1957,7 +2002,7 @@ function renderGeblokkeerd(){
       ${berichtenArr.map(([id,b]) => `
         <div class="ban-chat__bericht ban-chat__bericht--${b.van==='beheer'?'beheer':'gebruiker'}">
           <div class="ban-chat__afzender">${b.van==='beheer' ? 'Sitebeheer' : 'Jij'}</div>
-          <div class="ban-chat__tekst">${b.tekst}</div>
+          <div class="ban-chat__tekst">${esc(b.tekst)}</div>
         </div>`).join("")}
     </div>` : "";
   const berichtenGeblokkeerd = !!info.berichtenGeblokkeerd;
@@ -1976,7 +2021,7 @@ function renderGeblokkeerd(){
         <p>Je bent geblokkeerd voor ${MERKNAAM}${oneindig ? ", voor onbepaalde tijd" : totTekst}.</p>
         <p style="color:var(--text-dim); font-size:.85rem;">Denk je dat dit een vergissing is? Stuur hieronder een bericht naar sitebeheer — die kan je hier weer antwoorden.</p>
         ${berichtenHtml}
-        <textarea id="ban-bericht-tekst" rows="3" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" ${berichtVeldUit?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
+        <textarea id="ban-bericht-tekst" rows="3" maxlength="500" placeholder="Leg uit waarom je denkt dat dit een vergissing is…" ${berichtVeldUit?"disabled":""} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:12px;"></textarea>
         <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="ban-bericht-versturen" ${berichtVeldUit?"disabled":""}>Versturen</button>
         ${berichtStatusHtml}
       </div>
@@ -2002,17 +2047,17 @@ function renderLanding(){
         <div class="nieuws-teaser__titel">Nieuw in ${MERKNAAM}</div>
         ${siteUpdatesArr.map(([id,u]) => `
           <div class="nieuws-teaser__regel">
-            <span>${u.titel ? `<b>${u.titel}</b> — ` : ""}${u.tekst}</span>
-            <button type="button" class="nieuws-teaser__gelezen" data-action="update-gelezen" data-id="${id}" title="Verberg deze update op het startscherm">Gelezen ✕</button>
+            <span>${u.titel ? `<b>${esc(u.titel)}</b> — ` : ""}${esc(u.tekst)}</span>
+            <button type="button" class="nieuws-teaser__gelezen" data-action="update-gelezen" data-id="${esc(id)}" title="Verberg deze update op het startscherm">Gelezen ✕</button>
           </div>`).join("")}
       </div>` : "";
 
     const gemaaktArr = state.mijnRestaurants.filter(r => r.type !== "gejoind");
     const gejoindArr = state.mijnRestaurants.filter(r => r.type === "gejoind");
     const restaurantKaart = r => `
-      <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" data-code="${r.code}" style="width:320px;">
-        <div class="choice-card__title">Verder naar ${r.naam}</div>
-        <p class="choice-card__desc">Code ${r.code} — ga er direct naartoe.</p>
+      <button class="choice-card choice-card--actief" data-action="doorgaan-restaurant" data-code="${esc(r.code)}" style="width:320px;">
+        <div class="choice-card__title">Verder naar ${esc(r.naam)}</div>
+        <p class="choice-card__desc">Code ${esc(r.code)} — ga er direct naartoe.</p>
       </button>`;
     const restaurantsHtml = state.mijnRestaurants.length ? `
       ${gemaaktArr.length ? `
@@ -2069,9 +2114,10 @@ function renderLanding(){
           <input id="eigenaar-email" type="email" placeholder="jij@voorbeeld.nl" autofocus>
           <label class="form-card__label">Wachtwoord</label>
           <input id="eigenaar-wachtwoord" type="password" placeholder="••••••••">
-          ${registreren ? `<p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Minstens 6 tekens. Met dit account kun je je restaurant later terugvinden.</p>` : ""}
-          ${state.eigenaarAuthFoutmelding ? `<div class="fout">${state.eigenaarAuthFoutmelding}</div>` : ""}
+          ${registreren ? `<p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Minstens 8 tekens. Met dit account kun je je restaurant later terugvinden.</p>` : ""}
+          ${state.eigenaarAuthFoutmelding ? `<div class="fout">${esc(state.eigenaarAuthFoutmelding)}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="eigenaar-auth-verstuur" ${state.eigenaarAuthBezig?"disabled":""}>${registreren ? "Account aanmaken" : "Inloggen"}</button>
+          ${registreren ? "" : `<button class="terug-link" data-action="eigenaar-wachtwoord-reset">Wachtwoord vergeten?</button>`}
           <button class="terug-link" data-action="eigenaar-auth-wissel-modus">${registreren ? "Heb je al een account? Inloggen" : "Nog geen account? Account aanmaken"}</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
@@ -2088,11 +2134,11 @@ function renderLanding(){
       <div class="landing">
         ${merk}
         <div class="form-card">
-          ${state.eigenaarAuthEmail ? `<p style="color:var(--text-dim); font-size:.75rem; margin:-4px 0 14px;">Ingelogd als ${state.eigenaarAuthEmail} · <a href="#" data-action="eigenaar-uitloggen" style="color:var(--flame);">uitloggen</a></p>` : ""}
+          ${state.eigenaarAuthEmail ? `<p style="color:var(--text-dim); font-size:.75rem; margin:-4px 0 14px;">Ingelogd als ${esc(state.eigenaarAuthEmail)} · <a href="#" data-action="eigenaar-uitloggen" style="color:var(--flame);">uitloggen</a></p>` : ""}
           <label class="form-card__label">Naam van je restaurant</label>
           <input id="input-naam" type="text" placeholder="Bijv. GoudenPan" maxlength="${MAX_LETTERS_RESTAURANTNAAM}" autofocus>
           <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een restaurantnaam mag maximaal ${MAX_LETTERS_RESTAURANTNAAM} letters bevatten.</p>
-          ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
+          ${state.foutmelding ? `<div class="fout">${esc(state.foutmelding)}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="maak-restaurant">Restaurant aanmaken</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
@@ -2109,7 +2155,7 @@ function renderLanding(){
         <div class="form-card">
           <label class="form-card__label">Restaurantcode</label>
           <input id="input-code" type="text" placeholder="Bijv. K3F7Q" autofocus style="text-transform:uppercase; letter-spacing:.1em;">
-          ${state.foutmelding ? `<div class="fout">${state.foutmelding}</div>` : ""}
+          ${state.foutmelding ? `<div class="fout">${esc(state.foutmelding)}</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="join-restaurant">Restaurant joinen</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
@@ -2126,7 +2172,7 @@ function renderLanding(){
         <div class="form-card">
           <label class="form-card__label">Bericht naar sitebeheer</label>
           <p style="color:var(--text-dim); font-size:.8rem; margin:-6px 0 14px;">Suggestie, foutje gevonden, of iets anders kwijt? Stuur het rechtstreeks naar de bouwer van ${MERKNAAM}.</p>
-          <textarea id="feedback-tekst" rows="3" placeholder="Bijv. Ik zou graag ook..." style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
+          <textarea id="feedback-tekst" rows="3" maxlength="1000" placeholder="Bijv. Ik zou graag ook..." style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text);"></textarea>
           <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="feedback-versturen">Versturen</button>
           <button class="terug-link" data-action="terug-landing">← Terug</button>
         </div>
@@ -2153,7 +2199,7 @@ function renderBeheerPaneel(){
           <input id="beheer-email" type="email" placeholder="jij@voorbeeld.nl" ${geblokkeerd?"disabled":"autofocus"}>
           <label class="form-card__label">Wachtwoord</label>
           <input id="beheer-wachtwoord" type="password" placeholder="••••••••" ${geblokkeerd?"disabled":""}>
-          ${state.beheerFoutmelding ? `<div class="fout">${state.beheerFoutmelding}</div>` : geblokkeerd ? `<div class="fout">Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.</div>` : ""}
+          ${state.beheerFoutmelding ? `<div class="fout">${esc(state.beheerFoutmelding)}</div>` : geblokkeerd ? `<div class="fout">Te veel mislukte pogingen. Probeer het over ${minutenOver} minuut${minutenOver===1?"":"en"} opnieuw.</div>` : ""}
           <button class="btn btn--flame btn--block" data-action="beheer-inloggen" ${geblokkeerd?"disabled":""}>Inloggen</button>
           <button class="terug-link" data-action="beheer-sluiten">← Terug</button>
         </div>
@@ -2185,32 +2231,32 @@ function renderBeheerPaneel(){
         return `
         <div class="beheer-rest-rij">
           <div class="beheer-rest-rij__info">
-            <div class="beheer-rest-rij__naam">${r.naam || "(zonder naam)"} <span class="team-rij__badge">${code}</span></div>
+            <div class="beheer-rest-rij__naam">${esc(r.naam || "(zonder naam)")} <span class="team-rij__badge">${esc(code)}</span></div>
             <div class="beheer-rest-rij__meta">
               ${aantalLeden} teamlid${aantalLeden===1?"":"en"} · ${aantalProducten} product${aantalProducten===1?"":"en"} ·
               ${aantalOpenstaand} openstaande bestelling${aantalOpenstaand===1?"":"en"} · ${aantalHistorie} in historie
               ${datum ? ` · aangemaakt ${datum}` : ""}
-              · naamlimiet ${r.naamLimiet ? `${r.naamLimiet} letters` : `standaard (${MAX_LETTERS_RESTAURANTNAAM})`}
+              · naamlimiet ${r.naamLimiet ? `${esc(r.naamLimiet)} letters` : `standaard (${MAX_LETTERS_RESTAURANTNAAM})`}
             </div>
             <div class="beheer-rest-rij__leden">
-              ${eigenarenArr.length ? `<span class="beheer-rest-rij__eigenaar">${eigenarenArr.map(([,l]) => `👤 ${l.naam}`).join(" · ")}<span class="team-rij__badge" style="margin-left:6px;">${eigenarenArr.length > 1 ? "Eigenaren" : "Eigenaar"}</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
+              ${eigenarenArr.length ? `<span class="beheer-rest-rij__eigenaar">${eigenarenArr.map(([,l]) => `👤 ${esc(l.naam)}`).join(" · ")}<span class="team-rij__badge" style="margin-left:6px;">${eigenarenArr.length > 1 ? "Eigenaren" : "Eigenaar"}</span></span>` : `<span class="beheer-rest-rij__eigenaar" style="color:var(--text-dim);">Geen eigenaar bekend</span>`}
               ${overigeLeden.length ? `<span class="beheer-rest-rij__overige">
                 Team: ${overigeLeden.map(([lid_id,l]) =>
-                  `${l.naam} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-toevoegen" data-restaurant="${code}" data-id="${lid_id}" title="${l.naam} toevoegen als (mede-)eigenaar">+</button> <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-overzetten" data-restaurant="${code}" data-id="${lid_id}" title="Eigenaarschap volledig overzetten naar ${l.naam}">⇄</button>`
+                  `${esc(l.naam)} <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-toevoegen" data-restaurant="${esc(code)}" data-id="${esc(lid_id)}" title="${esc(l.naam)} toevoegen als (mede-)eigenaar">+</button> <button class="btn btn--ghost btn--sm" style="padding:2px 8px; font-size:.7rem;" data-action="beheer-lid-eigenaar-overzetten" data-restaurant="${esc(code)}" data-id="${esc(lid_id)}" title="Eigenaarschap volledig overzetten naar ${esc(l.naam)}">⇄</button>`
                 ).join(" · ")}
               </span>` : ""}
             </div>
             ${r.waarschuwing ? `
               <div class="beheer-rest-rij__waarschuwing">
-                ⚠ ${r.waarschuwing.tekst} <span class="beheer-rest-rij__waarschuwing-tijd">${wTijd ? "· verstuurd " + wTijd : ""}</span>
-                <button class="verwijder-x" data-action="beheer-waarschuwing-intrekken" data-id="${code}" title="Waarschuwing intrekken">✕</button>
+                ⚠ ${esc(r.waarschuwing.tekst)} <span class="beheer-rest-rij__waarschuwing-tijd">${wTijd ? "· verstuurd " + wTijd : ""}</span>
+                <button class="verwijder-x" data-action="beheer-waarschuwing-intrekken" data-id="${esc(code)}" title="Waarschuwing intrekken">✕</button>
               </div>` : ""}
           </div>
           <div class="beheer-rest-rij__acties">
-            <button class="btn btn--steel btn--sm" data-action="beheer-bezoeken" data-id="${code}">Bezoeken</button>
-            <button class="btn btn--ghost btn--sm" data-action="beheer-naamlimiet" data-id="${code}">Naamlimiet</button>
-            <button class="btn btn--ghost btn--sm" data-action="beheer-waarschuwen" data-id="${code}">${r.waarschuwing ? "Waarschuwing aanpassen" : "Waarschuwen"}</button>
-            <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-verwijderen" data-id="${code}">Verwijderen</button>
+            <button class="btn btn--steel btn--sm" data-action="beheer-bezoeken" data-id="${esc(code)}">Bezoeken</button>
+            <button class="btn btn--ghost btn--sm" data-action="beheer-naamlimiet" data-id="${esc(code)}">Naamlimiet</button>
+            <button class="btn btn--ghost btn--sm" data-action="beheer-waarschuwen" data-id="${esc(code)}">${r.waarschuwing ? "Waarschuwing aanpassen" : "Waarschuwen"}</button>
+            <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-verwijderen" data-id="${esc(code)}">Verwijderen</button>
           </div>
         </div>`;
       }).join("");
@@ -2231,22 +2277,22 @@ function renderBeheerPaneel(){
         // ooit een blokkade is geweest.
         const berichtenArr = Object.entries((ban && ban.berichten) || {}).sort((a,b) => (a[1].tijdstip||0)-(b[1].tijdstip||0));
         const chatOpen = state.beheerBanChatOpenId === apparaatId;
-        const chatToggleHtml = ban ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-chat-togglen" data-id="${apparaatId}">💬 Bericht${berichtenArr.length ? ` (${berichtenArr.length})` : ""}</button>` : "";
+        const chatToggleHtml = ban ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-chat-togglen" data-id="${esc(apparaatId)}">💬 Bericht${berichtenArr.length ? ` (${berichtenArr.length})` : ""}</button>` : "";
         const berichtenGeblokkeerd = !!(ban && ban.berichtenGeblokkeerd);
         const chatPaneelHtml = chatOpen ? `
           <div class="ban-chat ban-chat--beheer">
             ${berichtenArr.length ? berichtenArr.map(([id,b]) => `
               <div class="ban-chat__bericht ban-chat__bericht--${b.van==='beheer'?'beheer':'gebruiker'}">
-                <div class="ban-chat__afzender">${b.van==='beheer' ? 'Jij (sitebeheer)' : (g.naam || '(onbekend)')}</div>
-                <div class="ban-chat__tekst">${b.tekst}</div>
+                <div class="ban-chat__afzender">${b.van==='beheer' ? 'Jij (sitebeheer)' : esc(g.naam || '(onbekend)')}</div>
+                <div class="ban-chat__tekst">${esc(b.tekst)}</div>
               </div>`).join("") : `<div class="leeg" style="padding:6px 0;">Nog geen berichten.</div>`}
-            <textarea id="beheer-ban-bericht-tekst-${apparaatId}" rows="2" placeholder="Antwoord versturen…" style="width:100%; resize:vertical; font-family:inherit; font-size:.85rem; padding:8px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:8px;"></textarea>
+            <textarea id="beheer-ban-bericht-tekst-${esc(apparaatId)}" rows="2" placeholder="Antwoord versturen…" style="width:100%; resize:vertical; font-family:inherit; font-size:.85rem; padding:8px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:8px;"></textarea>
             <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
-              <button class="btn btn--flame btn--sm" data-action="beheer-ban-bericht-versturen" data-id="${apparaatId}">Versturen</button>
+              <button class="btn btn--flame btn--sm" data-action="beheer-ban-bericht-versturen" data-id="${esc(apparaatId)}">Versturen</button>
               ${berichtenGeblokkeerd
-                ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-berichten-deblokkeren" data-id="${apparaatId}">Berichtenfunctie weer aanzetten</button>`
-                : `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-berichten-blokkeren" data-id="${apparaatId}">Berichtenfunctie uitzetten</button>`}
-              ${berichtenArr.length ? `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-chat-verwijderen" data-id="${apparaatId}">Gesprek verwijderen</button>` : ""}
+                ? `<button class="btn btn--ghost btn--sm" data-action="beheer-ban-berichten-deblokkeren" data-id="${esc(apparaatId)}">Berichtenfunctie weer aanzetten</button>`
+                : `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-berichten-blokkeren" data-id="${esc(apparaatId)}">Berichtenfunctie uitzetten</button>`}
+              ${berichtenArr.length ? `<button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="beheer-ban-chat-verwijderen" data-id="${esc(apparaatId)}">Gesprek verwijderen</button>` : ""}
             </div>
             ${berichtenGeblokkeerd ? `<p style="color:var(--ember); font-size:.75rem; margin-top:6px;">Deze gebruiker kan momenteel geen berichten meer sturen.</p>` : ""}
           </div>` : "";
@@ -2254,17 +2300,17 @@ function renderBeheerPaneel(){
         <div class="beheer-rest-rij" style="flex-direction:column; align-items:stretch;">
           <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:14px; flex-wrap:wrap;">
             <div class="beheer-rest-rij__info">
-              <div class="beheer-rest-rij__naam">${g.naam || "(onbekend)"} ${statusHtml}</div>
+              <div class="beheer-rest-rij__naam">${esc(g.naam || "(onbekend)")} ${statusHtml}</div>
               <div class="beheer-rest-rij__meta">Eerste bezoek ${eersteDatum} · laatst gezien ${laatsteDatum}</div>
             </div>
             <div class="beheer-rest-rij__acties">
               ${chatToggleHtml}
-              <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-verwijderen" data-id="${apparaatId}">🗑️ Verwijderen</button>
+              <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-verwijderen" data-id="${esc(apparaatId)}">🗑️ Verwijderen</button>
               ${nogActief
-                ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${apparaatId}">Deblokkeren</button>`
-                : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${apparaatId}">Timeout (minuten)</button>
-                   <button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${apparaatId}">Blokkeer (dagen)</button>
-                   <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${apparaatId}">Blokkeer oneindig</button>`}
+                ? `<button class="btn btn--ghost btn--sm" data-action="gebruiker-deblokkeren" data-id="${esc(apparaatId)}">Deblokkeren</button>`
+                : `<button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-timeout" data-id="${esc(apparaatId)}">Timeout (minuten)</button>
+                   <button class="btn btn--steel btn--sm" data-action="gebruiker-blokkeren-dagen" data-id="${esc(apparaatId)}">Blokkeer (dagen)</button>
+                   <button class="btn btn--ghost btn--sm" style="border-color:var(--ember); color:var(--ember);" data-action="gebruiker-blokkeren-oneindig" data-id="${esc(apparaatId)}">Blokkeer oneindig</button>`}
             </div>
           </div>
           ${chatPaneelHtml}
@@ -2276,23 +2322,23 @@ function renderBeheerPaneel(){
     const datum = u.tijdstip ? new Date(u.tijdstip).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
     if(state.bewerkSiteUpdateId === id){
       return `<li class="update-lijst__bewerk-rij">
-        <input id="site-update-bewerk-titel-${id}" placeholder="Titel (optioneel)" value="${u.titel||""}">
+        <input id="site-update-bewerk-titel-${esc(id)}" placeholder="Titel (optioneel)" value="${esc(u.titel||"")}">
         <div class="update-form__row">
-          <input id="site-update-bewerk-tekst-${id}" placeholder="Wat is er veranderd?" value="${u.tekst||""}">
-          <button class="btn btn--flame btn--sm" data-action="site-update-opslaan" data-id="${id}">Opslaan</button>
-          <button class="btn btn--ghost btn--sm" data-action="site-update-bewerk-annuleren" data-id="${id}">Annuleren</button>
+          <input id="site-update-bewerk-tekst-${esc(id)}" placeholder="Wat is er veranderd?" value="${esc(u.tekst||"")}">
+          <button class="btn btn--flame btn--sm" data-action="site-update-opslaan" data-id="${esc(id)}">Opslaan</button>
+          <button class="btn btn--ghost btn--sm" data-action="site-update-bewerk-annuleren" data-id="${esc(id)}">Annuleren</button>
         </div>
       </li>`;
     }
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
-        ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
-        <span>${u.tekst}</span>
+        ${u.titel ? `<span class="update-lijst__titel">${esc(u.titel)}</span>` : ""}
+        <span>${esc(u.tekst)}</span>
       </div>
       <div class="update-lijst__acties">
-        <button class="verwijder-x" data-action="site-update-bewerken" data-id="${id}" title="Bewerken">✎</button>
-        <button class="verwijder-x" data-action="site-update-verwijder" data-id="${id}" title="Verwijderen">✕</button>
+        <button class="verwijder-x" data-action="site-update-bewerken" data-id="${esc(id)}" title="Bewerken">✎</button>
+        <button class="verwijder-x" data-action="site-update-verwijder" data-id="${esc(id)}" title="Verwijderen">✕</button>
       </div>
     </li>`;
   }).join("") : `<div class="leeg">Nog geen updates geplaatst.</div>`;
@@ -2303,10 +2349,10 @@ function renderBeheerPaneel(){
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
-        <span class="update-lijst__titel">${f.afzender || "(onbekend)"}${f.restaurantNaam ? ` — ${f.restaurantNaam} (${f.restaurantCode || "?"})` : ""}</span>
-        <span>${f.tekst}</span>
+        <span class="update-lijst__titel">${esc(f.afzender || "(onbekend)")}${f.restaurantNaam ? ` — ${esc(f.restaurantNaam)} (${esc(f.restaurantCode || "?")})` : ""}</span>
+        <span>${esc(f.tekst)}</span>
       </div>
-      <button class="verwijder-x" data-action="feedback-verwijderen" data-id="${id}" title="Verwerkt, wegklikken">✕</button>
+      <button class="verwijder-x" data-action="feedback-verwijderen" data-id="${esc(id)}" title="Verwerkt, wegklikken">✕</button>
     </li>`;
   }).join("") : `<div class="leeg">Nog geen berichten van eigenaren ontvangen.</div>`;
 
@@ -2316,9 +2362,9 @@ function renderBeheerPaneel(){
     return `<li>
       <div>
         <span class="update-lijst__datum">${datum}</span>
-        <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — <strong>${p.naam || "(geen naam ingevuld)"}</strong> (${p.email || "(leeg)"})</span>
+        <span>${p.succes ? "✅ Ingelogd" : "❌ Mislukte poging"} — <strong>${esc(p.naam || "(geen naam ingevuld)")}</strong> (${esc(p.email || "(leeg)")})</span>
       </div>
-      <button class="verwijder-x" data-action="poging-verwijder" data-id="${id}" title="Wegklikken">✕</button>
+      <button class="verwijder-x" data-action="poging-verwijder" data-id="${esc(id)}" title="Wegklikken">✕</button>
     </li>`;
   }).join("") : `<div class="leeg">Nog geen inlogpogingen geregistreerd.</div>`;
 
@@ -2351,7 +2397,7 @@ function renderBeheerPaneel(){
           <button class="btn btn--flame btn--sm" data-action="beheer-uitnodiging-maken">Nieuwe link maken</button>
           ${state.laatsteUitnodigingUrl ? `
             <div class="qr-link-tonen" style="margin-top:12px;">
-              <input readonly value="${state.laatsteUitnodigingUrl}">
+              <input readonly value="${esc(state.laatsteUitnodigingUrl)}">
               <button class="btn btn--ghost btn--sm" data-action="beheer-uitnodiging-kopieren">Link kopiëren</button>
             </div>` : ""}
         </div>
@@ -2415,21 +2461,22 @@ function renderDashboard(){
     <div class="shell">
       <header class="topbar">
         <div class="topbar__id">
-          <div class="topbar__naam">${state.restaurantNaam}</div>
-          <button class="topbar__code" data-action="kopieer-code" title="Klik om code te kopiëren">${state.restaurantCode}</button>
+          <div class="topbar__naam">${esc(state.restaurantNaam)}</div>
+          <button class="topbar__code" data-action="kopieer-code" title="Klik om code te kopiëren">${esc(state.restaurantCode)}</button>
           ${state.beheerBezoekModus ? `<span class="beheer-badge">🔒 Beheerder-weergave</span>` : ""}
         </div>
         <div style="display:flex; gap:14px; align-items:center;">
           ${state.beheerBezoekModus ? `<button class="terug-link" style="margin:0;" data-action="beheer-terug-paneel">← Terug naar beheerpaneel</button>` : `<button class="terug-link" style="margin:0;" data-action="terug-naar-start">🔀 Wissel restaurant</button>`}
-          ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${state.gebruikersNaam}</div>` : ""}
+          ${state.gebruikersNaam ? `<div class="topbar__gebruiker">${esc(state.gebruikersNaam)}</div>` : ""}
         </div>
       </header>
       ${state.waarschuwing ? `
       <div class="waarschuwing-banner">
         <span class="waarschuwing-banner__icoon">⚠</span>
-        <span class="waarschuwing-banner__tekst"><b>Bericht van sitebeheer:</b> ${state.waarschuwing.tekst}</span>
+        <span class="waarschuwing-banner__tekst"><b>Bericht van sitebeheer:</b> ${esc(state.waarschuwing.tekst)}</span>
         <button class="waarschuwing-banner__sluiten" data-action="waarschuwing-sluiten" title="Sluiten">✕</button>
       </div>` : ""}
+      ${state.verbondenGeweest && !state.verbonden ? `<div class="offline-banner">⚠ Geen verbinding — nieuwe bestellingen en wijzigingen komen pas aan zodra je weer online bent.</div>` : ""}
       <nav class="tabs">${tabsHtml}</nav>
       <main class="view" id="view-inhoud"></main>
     </div>`;
@@ -2468,8 +2515,8 @@ function renderBestellenPlattegrond(){
         const bezet = !!obj.bezet;
         cellenHtml += `
           <button type="button" class="plattegrond__cel plattegrond__cel--tafel ${bezet?'plattegrond__cel--bezet':'plattegrond__cel--vrij'}"
-            data-action="bestel-tafel-kiezen" data-cel="${key}" title="Tafel ${obj.nummer||''} — ${bezet?'bezet':'vrij'}">
-            🍽️<span class="plattegrond__nr">${obj.nummer||''}</span>
+            data-action="bestel-tafel-kiezen" data-cel="${key}" title="Tafel ${esc(obj.nummer||'')} — ${bezet?'bezet':'vrij'}">
+            🍽️<span class="plattegrond__nr">${esc(obj.nummer||'')}</span>
           </button>`;
       }
     }
@@ -2502,7 +2549,7 @@ function renderBestellenProducten(){
     productenHtml = `<div class="leeg">Nog geen producten. Voeg ze toe via Instellingen.</div>`;
   } else {
     categorieen.forEach(cat => {
-      productenHtml += `<div class="categorie-titel">${cat}</div><div class="product-grid">`;
+      productenHtml += `<div class="categorie-titel">${esc(cat)}</div><div class="product-grid">`;
       menuArr.filter(([,i]) => (i.categorie||"Overig") === cat).forEach(([id,i]) => {
         const uitverkocht = !!i.uitverkocht;
         const opties = [];
@@ -2510,10 +2557,10 @@ function renderBestellenProducten(){
         if(i.slagroomKeuze) opties.push("🥛");
         if(i.glasKeuze) opties.push("🥂");
         productenHtml += `
-          <button class="product-card ${uitverkocht?'product-card--uitverkocht':''}" ${uitverkocht?'disabled':'data-action="toevoegen-wagen"'} data-id="${id}">
+          <button class="product-card ${uitverkocht?'product-card--uitverkocht':''}" ${uitverkocht?'disabled':'data-action="toevoegen-wagen"'} data-id="${esc(id)}">
             ${uitverkocht ? `<span class="product-card__uitverkocht-badge">Uitverkocht</span>` : `<span class="product-card__plus">+</span>`}
-            <div class="product-card__emoji">${i.emoji||"🍽️"}</div>
-            <div class="product-card__naam">${i.naam}${opties.length?` <span class="product-card__opties">${opties.join(" ")}</span>`:""}</div>
+            <div class="product-card__emoji">${esc(i.emoji||"🍽️")}</div>
+            <div class="product-card__naam">${esc(i.naam)}${opties.length?` <span class="product-card__opties">${opties.join(" ")}</span>`:""}</div>
             <div class="product-card__prijs">${euro(i.prijs)}</div>
           </button>`;
       });
@@ -2528,30 +2575,30 @@ function renderBestellenProducten(){
     wagenHtml = wagenItems.map(([id,i]) => `
       <div class="wagen__regel">
         <div class="wagen__regel-top">
-          <div class="wagen__regel-naam">${i.emoji?i.emoji+" ":""}${i.naam}</div>
+          <div class="wagen__regel-naam">${i.emoji?esc(i.emoji)+" ":""}${esc(i.naam)}</div>
           <div class="wagen__aantal">
-            <button data-action="wagen-min" data-id="${id}">−</button>
-            <span>${i.aantal}</span>
-            <button data-action="wagen-plus" data-id="${id}">+</button>
+            <button data-action="wagen-min" data-id="${esc(id)}">−</button>
+            <span>${esc(i.aantal)}</span>
+            <button data-action="wagen-plus" data-id="${esc(id)}">+</button>
           </div>
         </div>
         ${i.ijsKeuze ? `
           <label class="wagen__checkbox">
-            <input type="checkbox" data-action="wagen-ijs" data-id="${id}" ${i.ijs?"checked":""}>
+            <input type="checkbox" data-action="wagen-ijs" data-id="${esc(id)}" ${i.ijs?"checked":""}>
             🧊 Met ijs
           </label>` : ""}
         ${i.slagroomKeuze ? `
           <label class="wagen__checkbox">
-            <input type="checkbox" data-action="wagen-slagroom" data-id="${id}" ${i.slagroom?"checked":""}>
+            <input type="checkbox" data-action="wagen-slagroom" data-id="${esc(id)}" ${i.slagroom?"checked":""}>
             🥛 Met slagroom
           </label>` : ""}
         ${i.glasKeuze ? `
           <label class="wagen__checkbox">
-            <input type="checkbox" data-action="wagen-glas" data-id="${id}" ${i.glas?"checked":""}>
+            <input type="checkbox" data-action="wagen-glas" data-id="${esc(id)}" ${i.glas?"checked":""}>
             🥂 Heeft al een glas
           </label>` : ""}
-        <input class="wagen__notitie" placeholder="Notitie, bijv. 'geen ui'" value="${i.notitie||""}" data-action="wagen-notitie" data-id="${id}">
-        <button class="wagen__verwijder" data-action="wagen-verwijder" data-id="${id}">verwijderen</button>
+        <input class="wagen__notitie" maxlength="120" placeholder="Notitie, bijv. 'geen ui'" value="${esc(i.notitie||"")}" data-action="wagen-notitie" data-id="${esc(id)}">
+        <button class="wagen__verwijder" data-action="wagen-verwijder" data-id="${esc(id)}">verwijderen</button>
       </div>`).join("");
   }
 
@@ -2569,12 +2616,12 @@ function renderBestellenProducten(){
         ${heeftPlattegrond ? `<button type="button" class="terug-link" data-action="bestel-terug-plattegrond">← Terug naar plattegrond</button>` : ""}
         ${state.actieveTafelCel ? `
           <div class="wagen__tafel-label">
-            🍽️ Tafel ${actieveCel ? actieveCel.nummer : ""}
+            🍽️ Tafel ${actieveCel ? esc(actieveCel.nummer) : ""}
             ${actieveCel && actieveCel.bezet ? `<span class="tafel-status tafel-status--bezet">bezet</span>` : `<span class="tafel-status tafel-status--vrij">nog vrij</span>`}
           </div>
-        ` : `<input class="wagen__tafel" placeholder="Tafel / naam (optioneel)" value="${state.tafel}" data-action="tafel-invoer">
+        ` : `<input class="wagen__tafel" maxlength="40" placeholder="Tafel / naam (optioneel)" value="${esc(state.tafel)}" data-action="tafel-invoer">
         ${namenGesorteerd().length ? `<div class="naam-kiezer">${namenGesorteerd().map(([,n]) =>
-          `<button type="button" class="naam-kiezer__chip ${state.tafel===n.naam?'actief':''}" data-action="naam-kiezen" data-naam="${n.naam.replace(/"/g,'&quot;')}">${n.naam}</button>`).join("")}</div>` : ""}`}
+          `<button type="button" class="naam-kiezer__chip ${state.tafel===n.naam?'actief':''}" data-action="naam-kiezen" data-naam="${esc(n.naam)}">${esc(n.naam)}</button>`).join("")}</div>` : ""}`}
         ${wagenHtml}
         <div class="wagen__totaal"><span>Totaal</span><span>${euro(totaal)}</span></div>
         <button class="btn btn--flame btn--block" data-action="verzend-bestelling" ${wagenItems.length?"":"disabled"}>Bestelling verzenden</button>
@@ -2587,27 +2634,27 @@ function renderBestellenProducten(){
 
 function ticketHtml(id, b, kolom){
   const items = (b.items||[]).map(it => `
-    <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
+    <li class="ticket__item"><b>${esc(it.aantal)}×</b> ${it.emoji?esc(it.emoji)+" ":""}${esc(it.naam)}
       ${itemExtraHtml(it)}
     </li>`).join("");
   const tijd = b.aangemaakt ? new Date(b.aangemaakt).toLocaleTimeString("nl-NL",{hour:"2-digit",minute:"2-digit"}) : "";
 
   let acties = "";
   if(kolom === "nieuw"){
-    acties = `<button class="btn btn--steel btn--sm" style="flex:1" data-action="start-bereiden" data-id="${id}">Bereiden</button>`;
+    acties = `<button class="btn btn--steel btn--sm" style="flex:1" data-action="start-bereiden" data-id="${esc(id)}">Bereiden</button>`;
   } else if(kolom === "bereiden"){
-    acties = `<button class="btn btn--fresh btn--sm" style="flex:1" data-action="bereiden-klaar" data-id="${id}">Bereiden klaar</button>`;
+    acties = `<button class="btn btn--fresh btn--sm" style="flex:1" data-action="bereiden-klaar" data-id="${esc(id)}">Bereiden klaar</button>`;
   } else if(kolom === "klaar"){
-    acties = `<button class="btn btn--flame btn--sm" style="flex:1" data-action="markeer-bezorgd" data-id="${id}">Bezorgd</button>`;
+    acties = `<button class="btn btn--flame btn--sm" style="flex:1" data-action="markeer-bezorgd" data-id="${esc(id)}">Bezorgd</button>`;
   }
 
   return `
     <div class="ticket">
       <div class="ticket__top">
-        <div class="ticket__nr">#${id.slice(-5).toUpperCase()}</div>
+        <div class="ticket__nr">#${esc(id.slice(-5).toUpperCase())}</div>
         <div class="ticket__tijd">${tijd}</div>
       </div>
-      ${b.tafel ? `<div class="ticket__tafel">${b.tafel}</div>` : ""}
+      ${b.tafel ? `<div class="ticket__tafel">${esc(b.tafel)}</div>` : ""}
       <ul class="ticket__items">${items}</ul>
       <div class="ticket__acties">${acties}</div>
     </div>`;
@@ -2670,24 +2717,24 @@ function renderHistorie(){
     <table class="historie-tabel">
       <thead><tr><th>Categorie</th><th>Aantal besteld</th></tr></thead>
       <tbody>
-        ${tellingenArr.map(([cat,aantal]) => `<tr><td>${cat}</td><td>${aantal}×</td></tr>`).join("")}
+        ${tellingenArr.map(([cat,aantal]) => `<tr><td>${esc(cat)}</td><td>${aantal}×</td></tr>`).join("")}
       </tbody>
     </table>` : `<div class="leeg">Nog geen geschiedenis om te tellen.</div>`;
 
   const lijstHtml = historieArr.map(([id,b]) => {
     const tijd = b.bezorgd ? new Date(b.bezorgd).toLocaleString("nl-NL",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}) : "";
     const items = (b.items||[]).map(it => `
-      <li class="ticket__item"><b>${it.aantal}×</b> ${it.emoji?it.emoji+" ":""}${it.naam}
+      <li class="ticket__item"><b>${esc(it.aantal)}×</b> ${it.emoji?esc(it.emoji)+" ":""}${esc(it.naam)}
         ${itemExtraHtml(it)}
       </li>`).join("");
     return `
       <div class="ticket">
         <div class="ticket__top">
-          <div class="ticket__nr">#${id.slice(-5).toUpperCase()}</div>
+          <div class="ticket__nr">#${esc(id.slice(-5).toUpperCase())}</div>
           <div class="ticket__tijd">${tijd}</div>
-          <button class="ticket__verwijder" data-action="historie-verwijder" data-id="${id}" title="Bestelling verwijderen">✕</button>
+          <button class="ticket__verwijder" data-action="historie-verwijder" data-id="${esc(id)}" title="Bestelling verwijderen">✕</button>
         </div>
-        ${b.tafel ? `<div class="ticket__tafel">${b.tafel}</div>` : ""}
+        ${b.tafel ? `<div class="ticket__tafel">${esc(b.tafel)}</div>` : ""}
         <ul class="ticket__items">${items}</ul>
       </div>`;
   }).join("");
@@ -2759,8 +2806,8 @@ function renderInstellingenUpdates(){
         <li>
           <div>
             <span class="update-lijst__datum">${datum}</span>
-            ${u.titel ? `<span class="update-lijst__titel">${u.titel}</span>` : ""}
-            <span>${u.tekst}</span>
+            ${u.titel ? `<span class="update-lijst__titel">${esc(u.titel)}</span>` : ""}
+            <span>${esc(u.tekst)}</span>
           </div>
         </li>`;
       }).join("")}
@@ -2793,16 +2840,16 @@ function renderInstellingenAlgemeen(){
               : (RECHTEN_DEFINITIES.filter(r => lid.rechten && lid.rechten[r.key]).map(r => r.label).join(", ") || "Geen rechten");
             return `
               <div class="team-rij">
-                <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
-                ${lid.functie ? `<div style="color:var(--text-dim); font-size:.82rem;">${lid.functie}</div>` : ""}
+                <div class="team-rij__naam">${esc(lid.naam)}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
+                ${lid.functie ? `<div style="color:var(--text-dim); font-size:.82rem;">${esc(lid.functie)}</div>` : ""}
                 <div style="color:var(--text-dim); font-size:.78rem;">${rechtenTekst}${lid.chatGeblokkeerd ? " · Chat geblokkeerd" : ""}</div>
               </div>`;
           }
           // Eigenaar-weergave: bewerkbaar, ook voor rijen van (andere) eigenaren.
           return `
             <div class="team-rij">
-              <div class="team-rij__naam">${lid.naam}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
-              <input class="team-rij__functie" placeholder="Functie, bijv. Ober" value="${lid.functie||""}" data-action="functie-wijzigen" data-id="${id}">
+              <div class="team-rij__naam">${esc(lid.naam)}${lid.eigenaar ? ' <span class="team-rij__badge">Eigenaar</span>' : ""}</div>
+              <input class="team-rij__functie" maxlength="40" placeholder="Functie, bijv. Ober" value="${esc(lid.functie||"")}" data-action="functie-wijzigen" data-id="${esc(id)}">
               ${lid.eigenaar ? `
                 <div style="color:var(--text-dim); font-size:.78rem;">Eigenaren hebben altijd alle rechten.</div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -2812,19 +2859,19 @@ function renderInstellingenAlgemeen(){
                 <div class="team-rij__rechten">
                   ${RECHTEN_DEFINITIES.map(r => `
                     <label class="team-recht">
-                      <input type="checkbox" data-action="recht-toggle" data-id="${id}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
+                      <input type="checkbox" data-action="recht-toggle" data-id="${esc(id)}" data-recht="${r.key}" ${lid.rechten && lid.rechten[r.key] ? "checked" : ""}>
                       ${r.label}
                     </label>`).join("")}
                   <label class="team-recht" title="Standaard mag iedereen onbeperkt chatten — vink uit om alleen lezen toe te staan.">
-                    <input type="checkbox" data-action="chat-recht-toggle" data-id="${id}" ${lid.chatGeblokkeerd ? "" : "checked"}>
+                    <input type="checkbox" data-action="chat-recht-toggle" data-id="${esc(id)}" ${lid.chatGeblokkeerd ? "" : "checked"}>
                     💬 Mag chatten
                   </label>
                 </div>
                 <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${id}" title="${lid.naam} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
-                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${id}" title="Eigenaarschap overzetten naar ${lid.naam} — jij wordt dan zelf teamlid">⇄ Overzetten</button>
+                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-toevoegen" data-id="${esc(id)}" title="${esc(lid.naam)} toevoegen als mede-eigenaar, naast jou">+ Mede-eigenaar</button>
+                  <button class="btn btn--ghost btn--sm" data-action="lid-eigenaar-maken" data-id="${esc(id)}" title="Eigenaarschap overzetten naar ${esc(lid.naam)} — jij wordt dan zelf teamlid">⇄ Overzetten</button>
                 </div>
-                <button class="verwijder-x" data-action="lid-verwijderen" data-id="${id}" title="Teamlid verwijderen">✕</button>
+                <button class="verwijder-x" data-action="lid-verwijderen" data-id="${esc(id)}" title="Teamlid verwijderen">✕</button>
               `}
             </div>`;
         }).join("")}
@@ -2835,7 +2882,7 @@ function renderInstellingenAlgemeen(){
     <div class="instel-blok">
       <div class="instel-blok__titel">Jouw naam</div>
       <div class="naam-wijzig-form">
-        <input id="eigen-naam-invoer" maxlength="${MAX_LETTERS_SITE_NAAM}" value="${eigenLid ? eigenLid.naam : (state.gebruikersNaam || "")}">
+        <input id="eigen-naam-invoer" maxlength="${MAX_LETTERS_SITE_NAAM}" value="${esc(eigenLid ? eigenLid.naam : (state.gebruikersNaam || ""))}">
         <button class="btn btn--flame btn--sm" data-action="eigen-naam-opslaan">Opslaan</button>
       </div>
       <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Verandert je naam overal: bij al je restaurants op dit toestel én in de site-brede gebruikerslijst van sitebeheer.</p>
@@ -2845,16 +2892,16 @@ function renderInstellingenAlgemeen(){
       <div class="instel-blok__titel">Restaurantnaam</div>
       ${heeftRecht('instellingen') ? `
         <div class="naam-wijzig-form">
-          <input id="restaurant-naam-invoer" maxlength="${effectieveNaamLimiet()}" value="${state.restaurantNaam}">
+          <input id="restaurant-naam-invoer" maxlength="${effectieveNaamLimiet()}" value="${esc(state.restaurantNaam)}">
           <button class="btn btn--flame btn--sm" data-action="naam-opslaan">Opslaan</button>
         </div>
-        <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Een restaurantnaam mag maximaal ${effectieveNaamLimiet()} letters bevatten.</p>` : `<div>${state.restaurantNaam}</div>`}
+        <p style="color:var(--text-dim); font-size:.75rem; margin:6px 0 0;">Een restaurantnaam mag maximaal ${effectieveNaamLimiet()} letters bevatten.</p>` : `<div>${esc(state.restaurantNaam)}</div>`}
     </div>
 
     <div class="instel-blok">
       <div class="instel-blok__titel">Restaurantcode</div>
       <div class="code-tonen">
-        <div class="code-tonen__code">${state.restaurantCode}</div>
+        <div class="code-tonen__code">${esc(state.restaurantCode)}</div>
         <button class="btn btn--ghost btn--sm" data-action="kopieer-code">Code kopiëren</button>
       </div>
       <p style="color:var(--text-dim); font-size:.82rem; margin-top:12px;">Deel deze code met collega's zodat zij kunnen joinen op hun eigen apparaat.</p>
@@ -2867,11 +2914,11 @@ function renderInstellingenAlgemeen(){
     <div class="instel-blok">
       <div class="instel-blok__titel">Zelfbestellen (QR-code)</div>
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Gasten scannen deze code, kiezen hun eigen tafel en bestellen zelf — de bestelling komt gewoon bij Keuken binnen, precies zoals bij een bestelling die het team invoert.</p>
-      <div class="qr-vak"><img id="qr-img-algemeen" src="${zelfBestelQrAfbeeldingUrl(state.restaurantCode)}" width="220" height="220" alt="QR-code naar de zelfbestel-pagina"></div>
+      <div class="qr-vak"><img id="qr-img-algemeen" src="${esc(zelfBestelQrAfbeeldingUrl(state.restaurantCode))}" width="220" height="220" alt="QR-code naar de zelfbestel-pagina"></div>
       <div class="qr-link-tonen">
-        <input readonly value="${zelfBestelUrl(state.restaurantCode)}">
+        <input readonly value="${esc(zelfBestelUrl(state.restaurantCode))}">
         <button class="btn btn--ghost btn--sm" data-action="qr-link-kopieren">Link kopiëren</button>
-        <a class="btn btn--ghost btn--sm" href="${zelfBestelUrl(state.restaurantCode)}" target="_blank" rel="noopener">Link openen ↗</a>
+        <a class="btn btn--ghost btn--sm" href="${esc(zelfBestelUrl(state.restaurantCode))}" target="_blank" rel="noopener">Link openen ↗</a>
       </div>
       <button class="btn btn--flame btn--block" style="margin-top:12px;" data-action="qr-printen">🖨️ Printen als PDF</button>
     </div>
@@ -2903,16 +2950,16 @@ function renderInstellingenProducten(){
   const menuArr = Object.entries(state.menu || {});
   const categorieenArr = categorieenGesorteerd();
   const categorieLijstHtml = categorieenArr.length ? categorieenArr.map(([id,c]) => `
-    <span class="categorie-chip">${c.naam}<button type="button" class="categorie-chip__x" data-action="categorie-verwijder" data-id="${id}" title="Categorie verwijderen">✕</button></span>
+    <span class="categorie-chip">${esc(c.naam)}<button type="button" class="categorie-chip__x" data-action="categorie-verwijder" data-id="${esc(id)}" title="Categorie verwijderen">✕</button></span>
   `).join("") : `<div class="leeg">Nog geen categorieën. Maak er hieronder een aan.</div>`;
 
   const menuHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li>
-      <span>${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.glasKeuze?' <span class="cat">🥂 glas</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
+      <span>${esc(i.emoji||"🍽️")} ${esc(i.naam)} <span class="cat">${esc(i.categorie)}</span>${i.ijsKeuze?' <span class="cat">🧊 ijs</span>':''}${i.slagroomKeuze?' <span class="cat">🥛 slagroom</span>':''}${i.glasKeuze?' <span class="cat">🥂 glas</span>':''}${i.uitverkocht?' <span class="cat cat--uitverkocht">uitverkocht</span>':''}</span>
       <span style="display:flex; align-items:center; gap:10px;">
         <span>${euro(i.prijs)}</span>
-        <button class="verwijder-x" data-action="menu-bewerken" data-id="${id}" title="Bewerken">✎</button>
-        <button class="verwijder-x" data-action="menu-verwijder" data-id="${id}">✕</button>
+        <button class="verwijder-x" data-action="menu-bewerken" data-id="${esc(id)}" title="Bewerken">✎</button>
+        <button class="verwijder-x" data-action="menu-verwijder" data-id="${esc(id)}">✕</button>
       </span>
     </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
 
@@ -2921,7 +2968,7 @@ function renderInstellingenProducten(){
   const emojiGrid = state.emojiPickerOpen ? `
     <div class="emoji-grid">
       ${Object.entries(EMOJI_CATEGORIEEN).map(([cat, lijst]) => `
-        <div class="emoji-grid__categorie">${cat}</div>
+        <div class="emoji-grid__categorie">${esc(cat)}</div>
         <div class="emoji-grid__rij">
           ${lijst.map(e => `<button type="button" data-action="emoji-kies" data-emoji="${e}" class="${e===state.nieuwProductEmoji?'actief':''}">${e}</button>`).join("")}
         </div>
@@ -2934,7 +2981,7 @@ function renderInstellingenProducten(){
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Maak hier eerst een categorie aan — die kies je daarna bij het toevoegen van een product. Bij Bestellen staan de producten van elke categorie in een rijtje onder de naam van die categorie.</p>
       <div class="categorie-lijst">${categorieLijstHtml}</div>
       <div class="categorie-form">
-        <input id="nieuwe-categorie" placeholder="Nieuwe categorie, bijv. Dranken">
+        <input id="nieuwe-categorie" maxlength="40" placeholder="Nieuwe categorie, bijv. Dranken">
         <button class="btn btn--flame btn--sm" data-action="categorie-toevoegen">✨ Toevoegen</button>
       </div>
     </div>
@@ -2943,9 +2990,9 @@ function renderInstellingenProducten(){
       <div class="instel-blok__titel">👤 Namenlijst</div>
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 14px;">Zet hier namen van mensen neer. Bij een bestelling zonder tafel kun je zo'n naam dan gewoon aanklikken, in plaats van 'm te typen.</p>
       <div class="categorie-lijst">${namenGesorteerd().length ? namenGesorteerd().map(([id,n]) => `
-        <span class="categorie-chip" style="--chip-icoon:'';">${n.naam}<button class="categorie-chip__x" data-action="naam-verwijder" data-id="${id}" title="Verwijderen">✕</button></span>`).join("") : `<div class="leeg">Nog geen namen toegevoegd.</div>`}</div>
+        <span class="categorie-chip" style="--chip-icoon:'';">${esc(n.naam)}<button class="categorie-chip__x" data-action="naam-verwijder" data-id="${esc(id)}" title="Verwijderen">✕</button></span>`).join("") : `<div class="leeg">Nog geen namen toegevoegd.</div>`}</div>
       <div class="categorie-form">
-        <input id="nieuwe-naam" placeholder="Nieuwe naam, bijv. Sara">
+        <input id="nieuwe-naam" maxlength="40" placeholder="Nieuwe naam, bijv. Sara">
         <button class="btn btn--flame btn--sm" data-action="naam-toevoegen">✨ Toevoegen</button>
       </div>
     </div>
@@ -2957,12 +3004,12 @@ function renderInstellingenProducten(){
           <button type="button" class="emoji-kiezer__knop" data-action="emoji-toggle">${state.nieuwProductEmoji}</button>
           ${emojiGrid}
         </div>
-        <input id="menu-naam" placeholder="Productnaam" maxlength="${MAX_LETTERS_PRODUCTNAAM}" value="${bewerkItem ? bewerkItem.naam : ""}">
-        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)" value="${bewerkItem ? bewerkItem.prijs : ""}">
+        <input id="menu-naam" placeholder="Productnaam" maxlength="${MAX_LETTERS_PRODUCTNAAM}" value="${esc(bewerkItem ? bewerkItem.naam : "")}">
+        <input id="menu-prijs" placeholder="Prijs (bijv. 5.50)" value="${esc(bewerkItem ? bewerkItem.prijs : "")}">
         <select id="menu-categorie" ${categorieenArr.length?"":"disabled"}>
-          ${categorieenArr.length ? categorieenArr.map(([,c]) => `<option value="${c.naam}" ${bewerkItem && bewerkItem.categorie===c.naam?"selected":""}>${c.naam}</option>`).join("") : `<option value="">Maak eerst een categorie</option>`}
+          ${categorieenArr.length ? categorieenArr.map(([,c]) => `<option value="${esc(c.naam)}" ${bewerkItem && bewerkItem.categorie===c.naam?"selected":""}>${esc(c.naam)}</option>`).join("") : `<option value="">Maak eerst een categorie</option>`}
         </select>
-        <button class="btn btn--flame" data-action="${bewerkItem?'menu-opslaan':'menu-toevoegen'}" data-id="${state.bewerkMenuId||""}" ${categorieenArr.length?"":"disabled"}>${bewerkItem?"💾 Opslaan":"Toevoegen"}</button>
+        <button class="btn btn--flame" data-action="${bewerkItem?'menu-opslaan':'menu-toevoegen'}" data-id="${esc(state.bewerkMenuId||"")}" ${categorieenArr.length?"":"disabled"}>${bewerkItem?"💾 Opslaan":"Toevoegen"}</button>
         ${bewerkItem ? `<button class="btn btn--ghost" data-action="menu-bewerk-annuleren">Annuleren</button>` : ""}
       </div>
       <p style="color:var(--text-dim); font-size:.75rem; margin:-10px 0 14px;">Een productnaam mag maximaal ${MAX_LETTERS_PRODUCTNAAM} letters bevatten.</p>
@@ -2988,9 +3035,9 @@ function renderVoorraad(){
   const menuArr = Object.entries(state.menu || {});
   const lijstHtml = menuArr.length ? menuArr.map(([id,i]) => `
     <li class="voorraad-rij ${i.uitverkocht?'voorraad-rij--uitverkocht':''}">
-      <span class="voorraad-rij__naam">${i.emoji||"🍽️"} ${i.naam} <span class="cat">${i.categorie}</span></span>
+      <span class="voorraad-rij__naam">${esc(i.emoji||"🍽️")} ${esc(i.naam)} <span class="cat">${esc(i.categorie)}</span></span>
       <label class="voorraad-toggle">
-        <input type="checkbox" data-action="voorraad-toggle" data-id="${id}" ${i.uitverkocht?"checked":""}>
+        <input type="checkbox" data-action="voorraad-toggle" data-id="${esc(id)}" ${i.uitverkocht?"checked":""}>
         <span>Uitverkocht</span>
       </label>
     </li>`).join("") : `<div class="leeg">Nog geen producten toegevoegd.</div>`;
@@ -3014,8 +3061,8 @@ function renderChat(){
     <div class="team-chat">
       ${berichtenArr.map(([id,b]) => `
         <div class="team-chat__bericht ${b.ledId===state.ledId ? 'team-chat__bericht--eigen' : ''}">
-          <div class="team-chat__afzender">${b.naam || "Onbekend"}</div>
-          <div class="team-chat__tekst">${b.tekst}</div>
+          <div class="team-chat__afzender">${esc(b.naam || "Onbekend")}</div>
+          <div class="team-chat__tekst">${esc(b.tekst)}</div>
         </div>`).join("")}
     </div>` : `<div class="leeg">Nog geen berichten — begin het gesprek met je team!</div>`;
 
@@ -3024,7 +3071,7 @@ function renderChat(){
     <div class="instel-blok">
       <p style="color:var(--text-dim); font-size:.82rem; margin:-4px 0 16px;">Chat live met iedereen in dit restaurant.${magChatten ? "" : " De eigenaar heeft de chatfunctie voor jou uitgezet — je kunt hier nog wel meelezen."}</p>
       ${berichtenHtml}
-      <textarea id="chat-tekst" rows="2" placeholder="${magChatten ? "Typ een bericht…" : "Je kunt momenteel niet chatten"}" ${magChatten?"":"disabled"} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:14px;"></textarea>
+      <textarea id="chat-tekst" rows="2" maxlength="300" placeholder="${magChatten ? "Typ een bericht…" : "Je kunt momenteel niet chatten"}" ${magChatten?"":"disabled"} style="width:100%; resize:vertical; font-family:inherit; font-size:.9rem; padding:10px; border-radius:var(--radius); background:var(--bg-2); border:1px solid var(--line); color:var(--text); margin-top:14px;"></textarea>
       <button class="btn btn--flame btn--block" style="margin-top:10px;" data-action="chat-versturen" ${magChatten?"":"disabled"}>Versturen</button>
     </div>`;
 }
@@ -3043,9 +3090,9 @@ function renderInstellingenAchtergrond(){
 
   const presetsHtml = THEMA_PRESETS.map(p => `
     <button type="button" class="thema-swatch ${huidigeAchtergrond.toLowerCase()===p.achtergrond.toLowerCase() && huidigeTekst.toLowerCase()===p.tekst.toLowerCase() ? 'actief':''}"
-      style="background:${p.achtergrond}; color:${p.tekst};"
-      data-action="thema-preset" data-bg="${p.achtergrond}" data-tekst="${p.tekst}">
-      Aa<br><span>${p.naam}</span>
+      style="background:${p.achtergrond}; color:${esc(p.tekst)};"
+      data-action="thema-preset" data-bg="${p.achtergrond}" data-tekst="${esc(p.tekst)}">
+      Aa<br><span>${esc(p.naam)}</span>
     </button>`).join("");
 
   const regenboogHtml = REGENBOOG_KLEUREN.map(kleur => `
@@ -3054,18 +3101,18 @@ function renderInstellingenAchtergrond(){
 
   const patroonHtml = PATROON_OPTIES.map(p => `
     <button type="button" class="patroon-swatch ${huidigPatroon===p.key?'actief':''}" data-action="thema-patroon" data-patroon="${p.key}">
-      <span class="patroon-swatch__emoji">${p.emoji || "🚫"}</span>
-      <span>${p.naam}</span>
+      <span class="patroon-swatch__emoji">${esc(p.emoji || "🚫")}</span>
+      <span>${esc(p.naam)}</span>
     </button>`).join("");
 
   const lettertypeHtml = LETTERTYPE_OPTIES.map(f => `
-    <button type="button" class="lettertype-swatch ${huidigLettertype===f.key?'actief':''}" style="font-family:${f.ui};" data-action="thema-lettertype" data-lettertype="${f.key}">${f.naam}</button>`).join("");
+    <button type="button" class="lettertype-swatch ${huidigLettertype===f.key?'actief':''}" style="font-family:${f.ui};" data-action="thema-lettertype" data-lettertype="${f.key}">${esc(f.naam)}</button>`).join("");
 
   const huidigVorm = huidig.vorm || "standaard";
   const vormHtml = VORM_OPTIES.map(v => `
     <button type="button" class="vorm-swatch ${huidigVorm===v.key?'actief':''}" data-action="thema-vorm" data-vorm="${v.key}">
       <span class="vorm-swatch__voorbeeld" style="border-radius:${v.radius};"></span>
-      <span>${v.naam}</span>
+      <span>${esc(v.naam)}</span>
     </button>`).join("");
 
   const huidigGeluid = huidig.geluid || "geen";
@@ -3076,7 +3123,7 @@ function renderInstellingenAchtergrond(){
   const eigenGeluidActief = huidigGeluid === "eigen";
   const eigenGeluidHtml = huidig.geluidEigenData ? `
     <div class="geluid-optie ${eigenGeluidActief?'actief':''}">
-      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="eigen">🎵 ${huidig.geluidEigenNaam || "Eigen geluid"}</button>
+      <button type="button" class="geluid-optie__kies" data-action="thema-geluid" data-geluid="eigen">🎵 ${esc(huidig.geluidEigenNaam || "Eigen geluid")}</button>
       <button type="button" class="geluid-optie__preview" data-action="geluid-eigen-preview" title="Beluister">▶</button>
       <button type="button" class="geluid-optie__verwijder" data-action="geluid-eigen-verwijderen" title="Verwijderen">🗑️</button>
     </div>` : "";
@@ -3145,7 +3192,7 @@ function renderInstellingenAchtergrond(){
         <div class="geluid-duur-rij">
           <label for="geluid-duur-invoer">Geluid inkorten tot</label>
           <input type="number" id="geluid-duur-invoer" min="${GELUID_MIN_DUUR}" step="1"
-            placeholder="heel geluid" value="${huidig.geluidDuur || ""}" data-action="geluid-duur">
+            placeholder="heel geluid" value="${esc(huidig.geluidDuur || "")}" data-action="geluid-duur">
           <span>sec (minimaal ${GELUID_MIN_DUUR} sec)</span>
         </div>` : ""}
       <p style="color:var(--text-dim); font-size:.82rem; margin:16px 0 8px;">Op welke tabbladen moet het geluid afgaan? Zet er zoveel aan als je wilt — het gaat per apparaat alleen af als dát apparaat op dat moment ook echt op zo'n tabblad staat, nergens anders. Vink bijv. Keuken aan voor nieuwe bestellingen, en Bezorgen voor bestellingen die klaar zijn om te bezorgen.</p>
@@ -3163,8 +3210,8 @@ function renderPlattegrond(){
     for(let c=0;c<KOLOMMEN;c++){
       const key = r + "-" + c;
       const obj = (state.plattegrond || {})[key];
-      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${obj.nummer}</span>`:""}` : stoelIconHtml(obj.rotatie)) : "";
-      cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+obj.type):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
+      const inhoud = obj ? (obj.type === "tafel" ? `🍽️${obj.nummer?`<span class="plattegrond__nr">${esc(obj.nummer)}</span>`:""}` : stoelIconHtml(obj.rotatie)) : "";
+      cellenHtml += `<button type="button" class="plattegrond__cel ${obj?('plattegrond__cel--'+esc(obj.type)):''}" data-action="plattegrond-cel" data-cel="${key}" ${magBewerken?"":"disabled"}>${inhoud}</button>`;
     }
   }
 
@@ -3221,6 +3268,9 @@ root.addEventListener("click", e => {
       eigenaarUitloggen();
       state.landingScherm = "start";
       render(); break;
+    case "eigenaar-wachtwoord-reset":
+      eigenaarWachtwoordReset(document.getElementById("eigenaar-email").value);
+      break;
     case "ga-joinen": state.landingScherm="joinen"; state.foutmelding=""; render(); break;
     case "ga-feedback": state.landingScherm="feedback"; state.foutmelding=""; render(); break;
     case "terug-landing": state.landingScherm="start"; state.foutmelding=""; render(); break;
@@ -3488,14 +3538,37 @@ db.ref("verwijderd/" + state.apparaatId).on("value", snap => {
   }
   render();
 });
+// Verbindingsstatus: bij een live bestelsysteem wil je het direct weten als het internet wegvalt,
+// anders denk je dat bestellingen verstuurd zijn terwijl ze nog in de wachtrij van de browser staan.
+db.ref(".info/connected").on("value", snap => {
+  state.verbonden = snap.val() === true;
+  if(state.verbonden) state.verbondenGeweest = true;
+  render();
+});
 uitnodigingVerwerken();
 // Houdt de sitebeheer-status bij op basis van Firebase Authentication (server-side gecontroleerd,
 // niet meer via localStorage) — vuurt ook meteen bij het laden als je nog een geldige sessie hebt.
 auth.onAuthStateChanged(gebruiker => {
-  state.beheerderActief = !!gebruiker;
-  state.beheerFoutmelding = "";
-  if(gebruiker && state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
-  render();
+  if(!gebruiker){ state.beheerderActief = false; render(); return; }
+  // Ingelogd is NIET hetzelfde als sitebeheerder: iedereen kan een Firebase-account aanmaken.
+  // Alleen accounts die in de database onder beheerders/<uid> = true staan, tellen echt mee.
+  db.ref("beheerders/" + gebruiker.uid).once("value").then(snap => {
+    if(snap.val() === true){
+      state.beheerderActief = true;
+      state.beheerFoutmelding = "";
+      if(state.beheerPaneelOpen){ alleRestaurantsLuisteren(); sitebeheerPogingenLuisteren(); feedbackLuisteren(); gebruikersLuisteren(); bansLuisteren(); }
+    } else {
+      state.beheerderActief = false;
+      state.beheerFoutmelding = "Dit account heeft geen sitebeheer-rechten.";
+      auth.signOut();
+    }
+    render();
+  }).catch(() => {
+    state.beheerderActief = false;
+    state.beheerFoutmelding = "Kon de beheerrechten niet controleren.";
+    auth.signOut();
+    render();
+  });
 });
 // Losstaande login-status voor restaurant-eigenaren (zie eigenaarAuth hierboven) — heeft geen
 // enkele invloed op state.beheerderActief / sitebeheer.
