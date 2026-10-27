@@ -14,6 +14,10 @@ const auth = firebase.auth();
 // zou iedere restaurant-eigenaar per ongeluk ook volledige sitebeheer-rechten krijgen.
 const eigenaarAuthApp = firebase.initializeApp(firebaseConfig, "eigenaarAuth");
 const eigenaarAuth = eigenaarAuthApp.auth();
+// Los account voor sitebrede gebruikers; gescheiden van Sitebeheer en restaurant-eigenaar-login.
+const accountAuthApp = firebase.initializeApp(firebaseConfig, "siteAccountAuth");
+const accountAuth = accountAuthApp.auth();
+const accountDb = accountAuthApp.database();
 const root = document.getElementById("app");
 
 // ---------- beveiligingshulpjes ----------
@@ -52,6 +56,105 @@ window.addEventListener("unhandledrejection", e => {
 });
 // Staat er ?nieuw=<token> in de link? Dan is dit een "nieuwe link" van sitebeheer (zie uitnodigingVerwerken).
 const uitnodigingToken = (new URLSearchParams(location.search).get("nieuw") || "").replace(/[^A-Za-z0-9]/g, "").slice(0, 40);
+
+// ---------- sitebreed account (gescheiden van restaurant- en sitebeheer-auth) ----------
+function accountMelding(tekst){ state.accountFout = tekst || ""; render(); }
+async function accountVersturen(){
+  if(state.accountBezig) return;
+  const naam = (document.getElementById("site-account-naam")?.value || "").trim().slice(0, MAX_LETTERS_SITE_NAAM);
+  const email = (document.getElementById("site-account-email")?.value || "").trim();
+  const wachtwoord = document.getElementById("site-account-wachtwoord")?.value || "";
+  const modus = state.accountModus;
+  if(modus === "registreren" && !naam) return accountMelding("Vul een gebruikersnaam in.");
+  if(!email || !wachtwoord) return accountMelding("Vul e-mailadres en wachtwoord in.");
+  if(modus === "registreren" && wachtwoord.length < 8) return accountMelding("Kies een wachtwoord van minstens 8 tekens.");
+  state.accountBezig = true; state.accountFout = "Bezig…"; render();
+  try {
+    let credential;
+    if(modus === "registreren") credential = await accountAuth.createUserWithEmailAndPassword(email, wachtwoord);
+    else credential = await accountAuth.signInWithEmailAndPassword(email, wachtwoord);
+    const user = credential.user;
+    if(modus === "registreren"){
+      await accountDb.ref("accounts/" + user.uid + "/profiel").set({
+        naam, email: user.email || email, aangemaakt: firebase.database.ServerValue.TIMESTAMP
+      });
+      state.accountNaam = naam;
+    } else {
+      const snap = await accountDb.ref("accounts/" + user.uid + "/profiel").once("value");
+      state.accountNaam = (snap.val() && snap.val().naam) || user.displayName || "";
+    }
+    state.accountEmail = user.email || email;
+    state.accountPaneOpen = false; state.accountFout = ""; state.accountBezig = false;
+    if(state.accountSitebeheerWens){
+      const adminSnap = await accountDb.ref("beheerders/" + user.uid).once("value");
+      if(adminSnap.val() !== true){
+        state.accountFout = "Account aangemaakt/ingelogd, maar dit account is niet door Sitebeheer gemachtigd. Alleen de site-eigenaar kan sitebeheerrechten toekennen.";
+        state.accountPaneOpen = true;
+      } else {
+        // Gebruik de bestaande Sitebeheer-auth pas na expliciete Firebase-autorisatie.
+        await auth.signInWithEmailAndPassword(email, wachtwoord);
+        state.beheerPaneelOpen = true;
+      }
+    }
+    render();
+  } catch(err) {
+    state.accountBezig = false;
+    const code = err && err.code;
+    state.accountFout = code === "auth/email-already-in-use" ? "Dit e-mailadres heeft al een account. Kies Inloggen."
+      : code === "auth/weak-password" ? "Kies een sterker wachtwoord (minstens 8 tekens)."
+      : code === "auth/invalid-email" ? "Dit e-mailadres is ongeldig."
+      : "Inloggen of account aanmaken is niet gelukt. Controleer je gegevens en Firebase-instellingen.";
+    render();
+  }
+}
+async function accountUitloggen(){
+  try { await accountAuth.signOut(); } catch(e) {}
+  state.accountEmail = null; state.accountNaam = ""; state.accountPaneOpen = false; state.accountFout = "";
+  render();
+}
+async function accountVerwijderen(){
+  const user = accountAuth.currentUser;
+  if(!user) return;
+  if(!confirm("Weet je zeker dat je dit account wilt verwijderen? Je bestaande restaurantgegevens worden niet automatisch verwijderd.")) return;
+  try {
+    await accountDb.ref("accounts/" + user.uid + "/profiel").remove();
+    await user.delete();
+    state.accountEmail = null; state.accountNaam = ""; state.accountPaneOpen = false;
+    toonToast("Account verwijderd. Bestaande restaurantgegevens zijn behouden.");
+  } catch(e) {
+    toonToast("Account verwijderen is niet gelukt. Log opnieuw in en probeer het nog eens.");
+  }
+  render();
+}
+function accountBalkHtml(){
+  const user = accountAuth.currentUser;
+  if(state.accountPaneOpen){
+    const registreren = state.accountModus === "registreren";
+    return `<div class="site-account-bar"><div class="site-account-card">
+      <strong>${registreren ? "Account aanmaken" : "Inloggen"}</strong>
+      ${registreren ? `<label class="form-card__label" for="site-account-naam">Gebruikersnaam</label><input id="site-account-naam" maxlength="${MAX_LETTERS_SITE_NAAM}" value="${esc(state.accountNaam)}" placeholder="Jouw naam">` : ""}
+      <label class="form-card__label" for="site-account-email">E-mailadres</label><input id="site-account-email" type="email" autocomplete="email" placeholder="jij@voorbeeld.nl">
+      <label class="form-card__label" for="site-account-wachtwoord">Wachtwoord</label><input id="site-account-wachtwoord" type="password" autocomplete="${registreren?"new-password":"current-password"}" placeholder="Minstens 8 tekens">
+      ${registreren ? `<label class="site-account-check"><input type="checkbox" id="site-account-admin" ${state.accountSitebeheerWens?"checked":""}> Ik wil ook Sitebeheer gebruiken (vereist aparte goedkeuring van de site-eigenaar).</label>` : ""}
+      ${state.accountFout ? `<p class="site-account-error">${esc(state.accountFout)}</p>` : ""}
+      <button class="btn btn--flame btn--sm" data-action="site-account-verstuur" ${state.accountBezig?"disabled":""}>${registreren?"Account aanmaken":"Inloggen"}</button>
+      <button class="btn btn--ghost btn--sm" data-action="site-account-wissel">${registreren?"Ik heb al een account":"Account aanmaken"}</button>
+      <button class="btn btn--ghost btn--sm" data-action="site-account-sluiten">Sluiten</button>
+    </div></div>`;
+  }
+  if(user) return `<div class="site-account-bar"><div class="site-account-user"><span>👤 ${esc(state.accountNaam || user.email || "Ingelogd")}</span><button class="btn btn--ghost btn--sm" data-action="site-account-naam">Naam wijzigen</button><button class="btn btn--ghost btn--sm" data-action="site-account-uitloggen">Uitloggen</button><button class="btn btn--ghost btn--sm" data-action="site-account-verwijderen">Account verwijderen</button></div></div>`;
+  return `<div class="site-account-bar"><button class="btn btn--flame btn--sm" data-action="site-account-open">🔐 Inloggen / Account maken</button></div>`;
+}
+function accountNaamWijzigen(){
+  const nieuw = prompt("Welke gebruikersnaam wil je gebruiken?", state.accountNaam || "");
+  if(nieuw === null) return;
+  const naam = nieuw.trim().slice(0, MAX_LETTERS_SITE_NAAM);
+  if(!naam) return toonToast("Vul een naam in.");
+  const user = accountAuth.currentUser; if(!user) return;
+  accountDb.ref("accounts/" + user.uid + "/profiel/naam").set(naam).then(() => {
+    state.accountNaam = naam; toonToast("Gebruikersnaam bijgewerkt."); render();
+  }).catch(() => toonToast("Naam opslaan is niet gelukt."));
+}
 
 // ---------- opslag van "mijn restaurants" (max 2 per apparaat/persoon) ----------
 // Migreert automatisch vanaf de oude opslag (vóór meerdere restaurants per apparaat mogelijk waren).
@@ -106,6 +209,13 @@ const state = {
   mijnRestaurants: laadMijnRestaurants(),  // [{code, naam, ledId, gebruikersNaam, type:"gemaakt"|"gejoind"}] — max 2 gemaakt, onbeperkt gejoind
   actiefInRestaurant: false,  // pas true na "doorgaan" / maken / joinen
   landingScherm: "start",     // start | maken-login | maken | joinen | feedback
+  accountPaneOpen: false,
+  accountModus: "inloggen",
+  accountNaam: "",
+  accountEmail: null,
+  accountFout: "",
+  accountBezig: false,
+  accountSitebeheerWens: false,
   eigenaarAuthEmail: null,        // e-mail van de ingelogde restaurant-eigenaar (via eigenaarAuth), of null
   eigenaarAuthModus: "inloggen",  // inloggen | registreren — welk tabblad actief is op het login-scherm
   eigenaarAuthFoutmelding: "",
@@ -1873,6 +1983,10 @@ function focusHerstellen(bewaard){
 function render(){
   const bewaardeFocus = huidigeFocusVastleggen();
   renderScherm();
+  if(!state.beheerPaneelOpen && !uitnodigingToken && root.firstElementChild && !state.geblokkeerd && !state.verwijderd){
+    const balk = document.createElement("div"); balk.innerHTML = accountBalkHtml();
+    root.insertBefore(balk.firstElementChild, root.firstElementChild);
+  }
   focusHerstellen(bewaardeFocus);
 }
 function renderScherm(){
@@ -3242,6 +3356,15 @@ root.addEventListener("click", e => {
   const id = el.dataset.id;
 
   switch(action){
+    case "site-account-open": state.accountPaneOpen=true; state.accountModus="inloggen"; state.accountFout=""; render(); break;
+    case "site-account-sluiten": state.accountPaneOpen=false; state.accountFout=""; render(); break;
+    case "site-account-wissel": state.accountModus=state.accountModus==="registreren"?"inloggen":"registreren"; state.accountFout=""; render(); break;
+    case "site-account-verstuur":
+      state.accountSitebeheerWens = !!document.getElementById("site-account-admin")?.checked;
+      accountVersturen(); break;
+    case "site-account-uitloggen": accountUitloggen(); break;
+    case "site-account-verwijderen": accountVerwijderen(); break;
+    case "site-account-naam": accountNaamWijzigen(); break;
     case "ga-maken": {
       const aantalGemaakt = state.mijnRestaurants.filter(r => r.type !== "gejoind").length;
       if(aantalGemaakt >= MAX_RESTAURANTS_GEMAAKT){
@@ -3569,6 +3692,15 @@ auth.onAuthStateChanged(gebruiker => {
     auth.signOut();
     render();
   });
+});
+accountAuth.onAuthStateChanged(async user => {
+  if(!user){ state.accountEmail=null; state.accountNaam=""; render(); return; }
+  state.accountEmail=user.email || null;
+  try {
+    const snap=await accountDb.ref("accounts/"+user.uid+"/profiel").once("value");
+    state.accountNaam=(snap.val() && snap.val().naam) || user.displayName || "";
+  } catch(e) {}
+  render();
 });
 // Losstaande login-status voor restaurant-eigenaren (zie eigenaarAuth hierboven) — heeft geen
 // enkele invloed op state.beheerderActief / sitebeheer.
