@@ -1691,3 +1691,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible{
 }
 .naam-kiezer__chip:hover{ border-color:var(--flame); }
 .naam-kiezer__chip.actief{ background:var(--flame); border-color:var(--flame); color:#1a0f08; }
+
+/* ============================================================
+   Toegevoegd: verbindingsmelding + taalkiezer
+   ============================================================ */
+.offline-banner{
+  margin:0 0 12px; padding:10px 14px;
+  background:rgba(193,91,63,.18); border:1px solid var(--ember); color:var(--text);
+  border-radius:var(--radius, 3px); font-size:.88rem; line-height:1.4;
+}
+.taal-kiezer{
+  display:inline-flex; align-items:center; gap:6px;
+  font-size:.78rem; color:var(--text-dim);
+}
+.taal-kiezer__label{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); } /* alleen voor schermlezers */
+.taal-kiezer select{
+  background:var(--bg-2); color:var(--text); border:1px solid var(--line);
+  border-radius:var(--radius, 3px); padding:6px 8px; font:inherit; font-size:.82rem; cursor:pointer;
+}
+.taal-kiezer select:focus-visible{ outline:2px solid var(--flame); outline-offset:2px; }
+.landing > .taal-kiezer{ position:absolute; top:14px; right:14px; }
+.topbar .taal-kiezer{ margin-left:auto; }
